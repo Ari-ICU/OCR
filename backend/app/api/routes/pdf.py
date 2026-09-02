@@ -1,0 +1,436 @@
+import json
+import asyncio
+import re
+import urllib.parse
+import httpx
+import logging
+from typing import Optional, Dict, List, Tuple, Any
+from fastapi import APIRouter, Request, HTTPException, Query, UploadFile
+from fastapi.responses import StreamingResponse, Response
+
+logger = logging.getLogger(__name__)
+
+try:
+    import pymupdf as fitz
+except ImportError:
+    import fitz
+
+from app.core.config import settings
+from app.services.pdf_service import PDFService
+from app.services.ai_service import AIService
+
+router = APIRouter(tags=["PDF & Image Processing & Streaming"])
+
+SUPPORTED_EXTENSIONS = (".pdf", ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tif")
+
+async def parse_request_files(request: Request) -> Tuple[List[Tuple[str, bytes]], Dict[str, Any]]:
+    """Robustly extracts all uploaded files and form fields from request without Pydantic type adapter issues."""
+    form = await request.form()
+    
+    # Collect all file objects submitted under any key in multipart form
+    uploads: List[UploadFile] = []
+    for key, value in form.multi_items():
+        if hasattr(value, "filename") and hasattr(value, "read"):
+            if value not in uploads:
+                uploads.append(value)
+                
+    if not uploads:
+        for key in ["files", "file"]:
+            for item in form.getlist(key):
+                if hasattr(item, "filename") and hasattr(item, "read"):
+                    if item not in uploads:
+                        uploads.append(item)
+                
+    if not uploads:
+        raise HTTPException(status_code=400, detail="No PDF or image files were received. Please select a file.")
+    
+    files_data: List[Tuple[str, bytes]] = []
+    for f in uploads:
+        fname = f.filename or "document.pdf"
+        content = await f.read()
+        
+        # Determine extension if missing
+        if "." not in fname:
+            ctype = (f.content_type or "").lower()
+            if "pdf" in ctype:
+                fname += ".pdf"
+            elif "jpeg" in ctype or "jpg" in ctype:
+                fname += ".jpg"
+            elif "webp" in ctype:
+                fname += ".webp"
+            else:
+                fname += ".png"
+                
+        fname_lower = fname.lower()
+        if not any(fname_lower.endswith(ext) for ext in SUPPORTED_EXTENSIONS):
+            raise HTTPException(status_code=400, detail=f"File '{fname}' format is unsupported. Only PDF, PNG, JPG, WEBP, and TIFF are supported.")
+            
+        if len(content) == 0:
+            raise HTTPException(status_code=400, detail=f"File '{fname}' is empty (0 bytes). Please click 'Change File' and re-select your document.")
+            
+        files_data.append((fname, content))
+    
+    # Extract form fields
+    fields = {}
+    for key, value in form.items():
+        if isinstance(value, str):
+            fields[key] = value
+
+    return files_data, fields
+
+@router.post("/extract-preview")
+async def extract_preview_endpoint(
+    request: Request,
+    start_page: int = Query(1),
+    end_page: Optional[int] = Query(None)
+):
+    """Extracts raw text, metadata, and visual page thumbnails for instant preview from single or multiple PDF/Image files."""
+    files_data, _ = await parse_request_files(request)
+    extracted = PDFService.extract_pages_from_files(
+        files_data,
+        start_page=start_page,
+        end_page=end_page,
+        include_thumbnails=True
+    )
+    return extracted
+
+@router.post("/extract-correct-stream")
+async def extract_correct_stream(request: Request):
+    """
+    Streams page-by-page progress, page thumbnails, and AI corrections via Server-Sent Events (SSE).
+    Supports single/multi-page PDFs as well as single or multiple image uploads (PNG, JPG, WEBP, TIFF).
+    """
+    files_data, fields = await parse_request_files(request)
+
+    mode = fields.get("mode", "vision")
+    provider = fields.get("provider", "gemini")
+    model = fields.get("model") or None
+    api_key = fields.get("api_key") or None
+    ollama_url = fields.get("ollama_url") or settings.DEFAULT_OLLAMA_URL
+    
+    try:
+        dpi = int(fields.get("dpi", 150))
+    except (ValueError, TypeError):
+        dpi = 150
+
+    try:
+        start_page = int(fields.get("start_page", 1))
+    except (ValueError, TypeError):
+        start_page = 1
+
+    end_page = None
+    if fields.get("end_page"):
+        try:
+            end_page = int(fields["end_page"])
+        except (ValueError, TypeError):
+            end_page = None
+
+    try:
+        concurrency = int(fields.get("concurrency", 2))
+    except (ValueError, TypeError):
+        concurrency = 2
+
+    is_local_ollama = (provider == "ollama" or (model and any(k in model.lower() for k in [":7b", ":14b", ":32b", "qwen2.5vl", "llama3.2-vision"])))
+    if is_local_ollama:
+        max_concurrency = 1
+    else:
+        max_concurrency = max(1, min(concurrency, 2))
+    render_dpi = max(72, min(dpi, 300))
+    doc_title = files_data[0][0] if len(files_data) == 1 else f"{len(files_data)} Merged Images"
+    
+    skip_pages_raw = fields.get("skip_pages", "")
+    skip_pages = set()
+    if skip_pages_raw:
+        try:
+            parsed = json.loads(skip_pages_raw)
+            if isinstance(parsed, list):
+                skip_pages = set(int(x) for x in parsed)
+        except Exception:
+            pass
+    
+    async def event_generator():
+        try:
+            doc = PDFService.create_document_from_files_data(files_data)
+            total_doc_pages = len(doc)
+            
+            s_idx = max(0, start_page - 1)
+            e_idx = min(total_doc_pages, end_page) if end_page else total_doc_pages
+            selected_pages_count = max(0, e_idx - s_idx)
+            
+            # Pre-extract all page images, thumbnails, and raw text safely in memory
+            pages_bundle = []
+            pages_overview = []
+            for i in range(s_idx, e_idx):
+                p = doc[i]
+                raw_txt = p.get_text("text").strip()
+                thumb = PDFService.render_page_thumbnail_base64(p, dpi=75)
+                highres_img = PDFService.render_page_image_bytes(p, dpi=render_dpi)
+                pages_overview.append({
+                    "page_number": i + 1,
+                    "raw_text": raw_txt,
+                    "char_count": len(raw_txt),
+                    "word_count": len(raw_txt.split()),
+                    "has_formulas": ("=" in raw_txt or "+" in raw_txt or "\\" in raw_txt),
+                    "thumbnail": thumb
+                })
+                pages_bundle.append({
+                    "page_number": i + 1,
+                    "raw_text": raw_txt,
+                    "image_bytes": highres_img
+                })
+            
+            # Close PyMuPDF document immediately to free memory and avoid thread locks
+            doc.close()
+
+            yield f"event: init\ndata: {json.dumps({'filename': doc_title, 'total_pages': selected_pages_count, 'doc_total_pages': total_doc_pages, 'start_page': s_idx + 1, 'end_page': e_idx, 'mode': mode, 'provider': provider, 'model': model or settings.MODELS_TO_TRY[0], 'metadata': {'title': doc_title, 'author': 'Unknown'}, 'pages_overview': pages_overview})}\n\n"
+            
+            if selected_pages_count == 0:
+                yield f"event: done\ndata: {json.dumps({'total_pages': 0, 'full_text': ''})}\n\n"
+                return
+
+            semaphore = asyncio.Semaphore(max_concurrency)
+            event_queue: asyncio.Queue = asyncio.Queue()
+            all_corrected_dict: Dict[int, str] = {}
+            active_tasks = []
+
+            async def process_single_page(item: Dict[str, Any]):
+                page_num = item["page_number"]
+                raw_txt = item["raw_text"]
+                img_bytes = item["image_bytes"]
+                
+                try:
+                    async with semaphore:
+                        # Notify page start
+                        await event_queue.put(
+                            f"event: page_start\ndata: {json.dumps({'page_number': page_num, 'raw_text': raw_txt})}\n\n"
+                        )
+
+                        # Fast-Skip for already completed / restored pages
+                        if page_num in skip_pages:
+                            res = {
+                                "success": True,
+                                "corrected_text": "",
+                                "model_used": "already-completed-cached",
+                                "elapsed_seconds": 0.0,
+                                "tokens_used": 0,
+                                "error": None,
+                                "already_completed": True
+                            }
+                        # Blank Page Fast-Skip: Check if page has no characters / is a blank scan
+                        elif (not raw_txt or len(raw_txt.strip()) == 0) and (img_bytes and PDFService.is_image_bytes_blank(img_bytes)):
+                            res = {
+                                "success": True,
+                                "corrected_text": "",
+                                "model_used": "blank-skipped",
+                                "elapsed_seconds": 0.01,
+                                "tokens_used": 0,
+                                "error": None,
+                                "is_blank": True
+                            }
+                        else:
+                            is_ollama_text_only = (provider == "ollama" and model and not any(v in model.lower() for v in ["vision", "vl", "llava", "minicpm", "moondream"]))
+
+                            if mode == "vision" and not is_ollama_text_only:
+                                # Multimodal Vision OCR on pre-rendered high-res image
+                                res = await AIService.process_page_vision_async(
+                                    image_bytes=img_bytes,
+                                    page_number=page_num,
+                                    provider=provider,
+                                    api_key=api_key,
+                                    preferred_model=model,
+                                    ollama_url=ollama_url or settings.DEFAULT_OLLAMA_URL
+                                )
+                                # Graceful fallback: If Vision OCR failed but digital text exists, use raw text
+                                if not res.get("success") and raw_txt and not res.get("corrected_text"):
+                                    res["corrected_text"] = raw_txt
+                                    res["model_used"] = "fallback-raw"
+                            else:
+                                # Digital text correction mode
+                                if not raw_txt:
+                                    res = {
+                                        "success": True,
+                                        "corrected_text": "",
+                                        "model_used": "blank-skipped",
+                                        "elapsed_seconds": 0.0,
+                                        "tokens_used": 0,
+                                        "error": None,
+                                        "is_blank": True
+                                    }
+                                else:
+                                    res = await AIService.process_page_text_async(
+                                        raw_text=raw_txt,
+                                        page_number=page_num,
+                                        provider=provider,
+                                        api_key=api_key,
+                                        preferred_model=model,
+                                        ollama_url=ollama_url or settings.DEFAULT_OLLAMA_URL
+                                    )
+
+                    all_corrected_dict[page_num] = res.get("corrected_text", "")
+                    
+                    # Notify page complete
+                    await event_queue.put(
+                        f"event: page_done\ndata: {json.dumps({'page_number': page_num, 'raw_text': raw_txt, 'corrected_text': res.get('corrected_text', ''), 'model_used': res.get('model_used', 'unknown'), 'elapsed_seconds': res.get('elapsed_seconds', 0.0), 'tokens_used': res.get('tokens_used', 0), 'success': res.get('success', False), 'error': res.get('error'), 'already_completed': res.get('already_completed', False), 'is_blank': res.get('is_blank', False)})}\n\n"
+                    )
+                except Exception as ex:
+                    logger.exception(f"Error processing page {page_num}: {ex}")
+                    all_corrected_dict[page_num] = raw_txt or ""
+                    await event_queue.put(
+                        f"event: page_done\ndata: {json.dumps({'page_number': page_num, 'raw_text': raw_txt, 'corrected_text': raw_txt or '', 'model_used': 'error-fallback', 'elapsed_seconds': 0.0, 'tokens_used': 0, 'success': False, 'error': str(ex)})}\n\n"
+                    )
+
+            # Launch all page worker tasks
+            for item in pages_bundle:
+                task = asyncio.create_task(process_single_page(item))
+                active_tasks.append(task)
+
+            # Stream events as workers finish
+            completed_count = 0
+            while completed_count < selected_pages_count:
+                if await request.is_disconnected():
+                    for t in active_tasks:
+                        t.cancel()
+                    break
+
+                try:
+                    event_item = await asyncio.wait_for(event_queue.get(), timeout=2.0)
+                    yield event_item
+                    if "event: page_done" in event_item:
+                        completed_count += 1
+                except asyncio.TimeoutError:
+                    if await request.is_disconnected():
+                        for t in active_tasks:
+                            t.cancel()
+                        break
+
+            # Wait for all background tasks to cleanly resolve
+            await asyncio.gather(*active_tasks, return_exceptions=True)
+
+            # Build full concatenated text in correct sequential order
+            ordered_blocks = [
+                f"=== ទំព័រទី {p['page_number']} (Page {p['page_number']}) ===\n\n{all_corrected_dict.get(p['page_number'], '')}\n"
+                for p in pages_overview
+            ]
+            full_text = "\n".join(ordered_blocks)
+
+            yield f"event: done\ndata: {json.dumps({'total_pages': selected_pages_count, 'full_text': full_text})}\n\n"
+            
+        except Exception as e:
+            yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream; charset=utf-8",
+        }
+    )
+
+def transform_cloud_url(raw_url: str) -> str:
+    """Transforms Google Drive, Dropbox, and cloud share links into direct downloadable URLs."""
+    url = raw_url.strip()
+    
+    # Google Drive view link: https://drive.google.com/file/d/{FILE_ID}/view...
+    gdrive_match = re.search(r'drive\.google\.com/file/d/([a-zA-Z0-9_-]+)', url)
+    if gdrive_match:
+        file_id = gdrive_match.group(1)
+        return f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
+    
+    # Google Drive open link: https://drive.google.com/open?id={FILE_ID}
+    gdrive_open_match = re.search(r'drive\.google\.com/open\?id=([a-zA-Z0-9_-]+)', url)
+    if gdrive_open_match:
+        file_id = gdrive_open_match.group(1)
+        return f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
+
+    # Dropbox link: dl=0 -> dl=1
+    if "dropbox.com" in url and "dl=0" in url:
+        return url.replace("dl=0", "dl=1")
+    elif "dropbox.com" in url and "dl=1" not in url:
+        return url + ("&dl=1" if "?" in url else "?dl=1")
+
+    return url
+
+@router.post("/fetch-url")
+async def fetch_url_endpoint(request: Request):
+    """
+    Downloads a remote PDF or image file from a public URL or cloud share link (e.g. Google Drive, Dropbox).
+    Returns the binary content with appropriate filename headers.
+    """
+    target_url = None
+    if request.headers.get("content-type", "").startswith("application/json"):
+        try:
+            body = await request.json()
+            target_url = body.get("url")
+        except Exception:
+            pass
+    else:
+        form = await request.form()
+        target_url = form.get("url")
+
+    if not target_url or not str(target_url).strip():
+        raise HTTPException(status_code=400, detail="Please enter a valid PDF or image link (URL).")
+
+    clean_url = transform_cloud_url(str(target_url).strip())
+    
+    try:
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=45.0,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+        ) as client:
+            resp = await client.get(clean_url)
+            if resp.status_code != 200:
+                raise HTTPException(status_code=400, detail=f"Failed to download file from link (HTTP {resp.status_code}). Please make sure the link is publicly accessible.")
+            
+            content = resp.content
+            if not content or len(content) == 0:
+                raise HTTPException(status_code=400, detail="The provided link returned an empty file.")
+
+            # Extract filename from Content-Disposition header or URL path
+            cd = resp.headers.get("content-disposition", "")
+            filename = None
+            if "filename=" in cd:
+                match = re.search(r'filename=["\']?([^"\';]+)["\']?', cd)
+                if match:
+                    filename = match.group(1).strip()
+
+            if not filename:
+                parsed_path = urllib.parse.urlparse(clean_url).path
+                base = parsed_path.split("/")[-1].strip()
+                if base and any(base.lower().endswith(ext) for ext in SUPPORTED_EXTENSIONS):
+                    filename = base
+
+            ctype = resp.headers.get("content-type", "").lower()
+            if not filename:
+                if "pdf" in ctype or content.startswith(b"%PDF"):
+                    filename = "imported_document.pdf"
+                elif "jpeg" in ctype or "jpg" in ctype:
+                    filename = "imported_image.jpg"
+                elif "png" in ctype or content.startswith(b"\x89PNG"):
+                    filename = "imported_image.png"
+                elif "webp" in ctype:
+                    filename = "imported_image.webp"
+                else:
+                    filename = "imported_document.pdf"
+
+            media_type = "application/pdf" if filename.lower().endswith(".pdf") else (ctype or "image/png")
+
+            return Response(
+                content=content,
+                media_type=media_type,
+                headers={
+                    "Content-Disposition": f'inline; filename="{filename}"',
+                    "X-Filename": filename,
+                    "Access-Control-Expose-Headers": "X-Filename, Content-Disposition"
+                }
+            )
+
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=400, detail=f"Network connection failed when downloading link: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error importing from link: {str(e)}")
+
