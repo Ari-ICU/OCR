@@ -1,54 +1,70 @@
-# KhmerPDF AI — Khmer PDF Vision OCR & LaTeX Math Engine
+# Khmer PDF & Vision AI Engine (OCR)
 
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI%20%28Python%29-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016%20%28React%29-000000.svg?logo=next.js&logoColor=white)](https://nextjs.org/)
-[![Google Gemini](https://img.shields.io/badge/AI-Gemini%203.5%20Flash%20Lite-4285F4.svg?logo=google&logoColor=white)](https://ai.google.dev/)
+[![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016%20%28Turbopack%29-000000.svg?logo=next.js&logoColor=white)](https://nextjs.org/)
+[![Google Gemini](https://img.shields.io/badge/AI-Gemini%203.6%20%26%203.5%20Flash-4285F4.svg?logo=google&logoColor=white)](https://ai.google.dev/)
 [![KaTeX](https://img.shields.io/badge/Math-KaTeX%20LaTeX-3298DC.svg?logo=latex&logoColor=white)](https://katex.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-An enterprise-grade, high-performance system for extracting, digitizing, and restoring **Khmer PDF documents**, scanned books, research theses, and technical papers into clean standard **Khmer Unicode Markdown** with **100% LaTeX mathematical & scientific formulas**.
+An enterprise-grade, high-throughput system for extracting, digitizing, and restoring **Khmer PDF documents**, scanned books, research theses, and technical papers into clean standard **Khmer Unicode Markdown** with **100% LaTeX mathematical & scientific formulas**.
 
 ---
 
 ## 🌟 Key Features
 
-- **Multimodal Vision OCR**: Uses Google Gemini 3.5 Flash Lite / 3.6 Flash / 3.7 Flash and local Ollama VLM models to read high-resolution rendered PDF pages directly.
-- **Khmer Unicode Integrity**: Preserves standard Unicode ordering (`Base Consonant + Subscript ជើង + Vowel + Signs`) and fixes legacy font corruptions.
-- **Mathematical & STEM Restoration**: Detects, compiles, and formats complex equations ($...$, $$...$$, fractions, matrices, roots, chemistry formulas) into KaTeX LaTeX.
-- **Multi-Key Pool & 429 Instant Failover**: Supports multi-account Gemini API keys with round-robin load balancing and instant zero-wait failover on rate limits.
-- **Real-Time SSE Streaming**: Live page-by-page rendering, worker slot animation, and batch progress tracking.
-- **Khmer Red Line Spellchecker**: Real-time visual anomaly detector highlighting broken subscripts or misplaced vowels with red wavy underlines and tooltips.
-- **Continuous Multi-Batch Extraction**: Freely process specific page ranges (e.g. `1-10`, `11-20`) with seamless sequential appending and merging.
-- **Live Telemetry Monitor**: Integrated terminal streaming real-time backend API events, latencies, and rate-limit cooldown metrics.
-- **Multi-Format Export**: Export results to `.md` (Markdown), `.txt` (Plain Text), or `.json` with 1-click clipboard copying.
+- 🇰🇭 **Multimodal Khmer Vision OCR**: Powered by Google Gemini 3.6 Flash and Gemini 3.5 Flash to accurately recognize complex Khmer scripts, ligatures, subscripts (ជើង), and diacritics.
+- 📐 **100% LaTeX Mathematical & Scientific Restoration**: Automatically detects and restores inline/display mathematical formulas ($...$, $$...$$, fractions, matrices, roots, chemical equations) into rendered KaTeX LaTeX.
+- 🔑 **Multi-Account API Key Pool & Load Balancer**: Supports adding multiple Gemini API keys. The engine automatically rotates keys using round-robin scheduling, mutual exclusion pacing, and instant 429 quota failover.
+- ⚡ **Zero-Downtime Fallback & Pacing**: When a key reaches the daily free cap (20 requests/day) on `gemini-3.6-flash`, the system seamlessly fails over to `gemini-3.5-flash` or the next replacement key in the pool.
+- 📊 **Real-Time Key Telemetry Dashboard**: Live monitoring for requests processed, tokens consumed, active cooldown countdowns, and remaining daily quota per key.
+- 🔄 **Real-Time SSE Streaming**: Live parallel page processing with visual worker chips (`P1`, `P2`), thumbnail previews, and instant page-by-page streaming.
+- 🛡️ **Live API Key Verification & Auto-Purge**: Built-in verification tool that tests all keys against Google's API simultaneously and allows 1-click purging of invalid or deleted keys.
+- 💻 **Live Telemetry Terminal**: Real-time log monitor streaming backend events, latencies, model fallbacks, and rate-limit diagnostics.
+- 📥 **Multi-Format Export**: 1-click download as Markdown (`.md`), Plain Text (`.txt`), or structured JSON (`.json`).
 
 ---
 
 ## 🏗️ System Architecture
 
-```
+```text
 pdf-text/
-├── backend/                  # FastAPI Python Backend
+├── backend/                      # FastAPI Python Backend
 │   ├── app/
-│   │   ├── api/routes/       # API endpoints (pdf, logs, health)
-│   │   ├── core/config.py    # System settings & model metadata
+│   │   ├── api/
+│   │   │   ├── routes/           # API routes
+│   │   │   │   ├── pdf.py        # PDF extraction & SSE streaming
+│   │   │   │   ├── keys.py       # Key pool status, reset & verification
+│   │   │   │   ├── logs.py       # Live telemetry & log streaming
+│   │   │   │   ├── health.py     # Health checks & system metadata
+│   │   │   │   └── export.py     # Markdown/Text/JSON export endpoints
+│   │   │   └── router.py         # Main API router registry
+│   │   ├── core/
+│   │   │   └── config.py         # App configuration & Gemini model settings
 │   │   ├── services/
-│   │   │   ├── ai_service.py     # Gemini & Ollama Multimodal Vision / LLM logic
-│   │   │   ├── key_manager.py    # Multi-key pool rotation & rate-limit cooldown
-│   │   │   ├── log_service.py    # Ring buffer & SSE log broadcasting
-│   │   │   └── pdf_service.py    # PyMuPDF rendering & text extraction
-│   │   └── main.py           # FastAPI entry point & CORS configuration
+│   │   │   ├── ai_service.py     # Gemini Vision OCR & prompt engineering
+│   │   │   ├── key_manager.py    # Multi-key pool rotation, leasing & cooldowns
+│   │   │   ├── pdf_service.py    # PyMuPDF rendering & image extraction
+│   │   │   └── log_service.py    # Ring buffer & SSE log broadcasting
+│   │   └── main.py               # FastAPI application entry point
 │   └── requirements.txt
 │
-├── frontend/                 # Next.js 16 (App Router) + Tailwind CSS
+├── frontend/                     # Next.js 16 (Turbopack) Frontend
 │   ├── src/
-│   │   ├── app/              # Main page, layout, globals.css
-│   │   ├── components/       # UI Components (Navbar, FileUpload, PageCard,
-│   │   │                     # ProcessingBackbone, LogMonitor, StatsBar, MathRenderer)
-│   │   └── utils/            # khmerValidator (Red wavy line detector)
+│   │   ├── app/                  # App Router (page.tsx, layout.tsx, globals.css)
+│   │   ├── components/           # UI Components
+│   │   │   ├── Navbar.tsx            # Header navigation & tab switching
+│   │   │   ├── FileUpload.tsx        # Drag & drop PDF/image uploader
+│   │   │   ├── ProcessingBackbone.tsx# Live worker slots, progress & key pool pills
+│   │   │   ├── KeyManagementView.tsx # Multi-key management & telemetry dashboard
+│   │   │   ├── PageCard.tsx          # Page Markdown/KaTeX preview card
+│   │   │   ├── MathRenderer.tsx      # KaTeX LaTeX formula renderer
+│   │   │   └── LogMonitor.tsx        # Real-time backend terminal log viewer
+│   │   └── config/api.ts         # API base URL configuration
 │   └── package.json
 │
-├── pdf_to_khmer_text.py      # Standalone CLI batch extraction script
-└── sample_khmer.pdf          # Sample Khmer PDF document for testing
+├── pdf_to_khmer_text.py          # Standalone CLI batch extraction script
+├── .gitignore                    # Git ignore file
+└── README.md
 ```
 
 ---
@@ -56,90 +72,83 @@ pdf-text/
 ## 🚀 Quick Start Guide
 
 ### 1. Prerequisites
-
-Ensure you have installed:
 - **Python 3.10+**
-- **Node.js 18+** and **npm**
-- *(Optional)* **Ollama** if you plan to run local offline models (`ollama run qwen2.5:7b`)
+- **Node.js 18+** & **npm**
 
 ---
 
-### 2. Backend Setup & Run
+### 2. Backend Setup
 
-1. Open a terminal in the project root:
 ```bash
-# Create and activate Python virtual environment
+# 1. Navigate to backend directory
+cd backend
+
+# 2. Create and activate a virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Install Python dependencies
-pip install -r backend/requirements.txt
-```
+# 3. Install dependencies
+pip install -r requirements.txt
 
-2. Start the FastAPI backend server:
-```bash
-cd backend
+# 4. Start the FastAPI server
 uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
-- API Health Endpoint: `http://127.0.0.1:8000/api/health`
-- Swagger Documentation: `http://127.0.0.1:8000/docs`
+
+- **Health Check**: `http://127.0.0.1:8000/api/health`
+- **Swagger API Docs**: `http://127.0.0.1:8000/docs`
 
 ---
 
-### 3. Frontend Setup & Run
+### 3. Frontend Setup
 
-1. Open a second terminal window:
 ```bash
+# 1. Open a new terminal and navigate to frontend directory
 cd frontend
 
-# Install Node dependencies
+# 2. Install dependencies
 npm install
 
-# Start development server
+# 3. Start the Next.js development server
 npm run dev
 ```
-2. Open your browser and navigate to **`http://localhost:3000`**.
+
+- Open **`http://localhost:3000`** in your browser.
 
 ---
 
-### 4. Standalone CLI Tool Usage
+### 4. Standalone CLI Batch OCR
 
-You can also run batch conversions directly from the terminal without opening the web interface:
+You can also run batch OCR directly from the command line:
 
 ```bash
-# Extract using Gemini Vision OCR (Recommended)
-./.venv/bin/python pdf_to_khmer_text.py sample_khmer.pdf --mode vision --output full_thesis.txt
+# Extract full PDF using Gemini Vision OCR
+python3 pdf_to_khmer_text.py sample.pdf --mode vision --output output.txt
 
-# Extract specific page range (e.g. Pages 1 to 10)
-./.venv/bin/python pdf_to_khmer_text.py sample_khmer.pdf --start-page 1 --end-page 10 -o pages_1_10.txt
+# Extract specific page range (e.g. Pages 1 to 20)
+python3 pdf_to_khmer_text.py sample.pdf --start-page 1 --end-page 20 -o pages_1_20.txt
 
-# Append to an existing output file
-./.venv/bin/python pdf_to_khmer_text.py sample_khmer.pdf --start-page 11 --end-page 20 -o pages_1_10.txt --append
-
-# Use local Ollama offline Vision OCR model
-./.venv/bin/python pdf_to_khmer_text.py sample_khmer.pdf --provider ollama --mode vision --model qwen2.5vl:7b -o output.txt
+# Append to existing output file
+python3 pdf_to_khmer_text.py sample.pdf --start-page 21 --end-page 40 -o pages_1_20.txt --append
 ```
 
 ---
 
-## ⚙️ Configuration & API Keys
+## 🔑 Multi-Key Scaling & Rate Limit Management
 
-### Adding Gemini API Keys
-1. **Via UI**: Click **Settings** (`⚙️`) in the top navbar. Paste 1, 2, or more Gemini API keys (one per line). Keys are securely remembered in browser `localStorage`.
-2. **Via Environment Variable**:
-```bash
-export GEMINI_API_KEY="your-gemini-api-key-here"
-```
+Google Gemini provides a free tier of **20 requests/day per key** for `gemini-3.6-flash` and **15 RPM (Requests Per Minute)**.
 
-### Supported Models
-| Model ID | Provider | Type | Recommended For |
-| :--- | :--- | :--- | :--- |
-| `gemini-3.6-flash` | Google AI | Multimodal VLM | **High-Accuracy Khmer Vision OCR, Subscripts & LaTeX Formulas (#1 Recommended)** |
-| `gemini-3.5-flash` | Google AI | Multimodal VLM | **High-Throughput Khmer OCR & LaTeX restoration (#2 Recommended)** |
-| `qwen2.5vl:7b` | Ollama (Local) | Multimodal VLM | **Fast 7B Local Vision OCR directly on your Mac with zero rate limits** |
-| `qwen2.5vl:32b` | Ollama (Local) | Multimodal VLM | **High-Precision 32B Local Vision OCR directly on your Mac (Heavy/Detailed)** |
-| `Qwen/Qwen2.5-VL-72B-Instruct` | Hugging Face | Multimodal VLM | Free cloud Vision OCR backup |
-| `llama3.2-vision:11b` | Ollama (Local) | Multimodal VLM | Offline local Vision OCR |
+To scale your throughput:
+1. Obtain free API keys from [Google AI Studio](https://aistudio.google.com/app/apikey).
+2. Navigate to the **API Keys Tab (`#keys`)** in the web application.
+3. Paste your keys (one per line) into the pool.
+4. Click **"Save & Activate Pool"**.
+
+### Capacity Scaling Example:
+| Active Keys in Pool | Daily Free Capacity | Throughput (RPM) | Parallel Workers |
+| :---: | :---: | :---: | :---: |
+| **1 Key** | ~20 pages/day | 15 RPM | 1-2 workers |
+| **10 Keys** | ~200 pages/day | 150 RPM | 2-4 workers |
+| **30 Keys** | ~600 pages/day | 450 RPM | 4-6 workers |
 
 ---
 
@@ -147,10 +156,13 @@ export GEMINI_API_KEY="your-gemini-api-key-here"
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
-| `GET` | `/api/health` | Service health status and active models list |
+| `GET` | `/api/health` | Service health status and supported models |
 | `POST` | `/api/extract-preview` | Extracts page count, metadata, and visual thumbnails |
 | `POST` | `/api/extract-correct-stream` | Server-Sent Events (SSE) live extraction & OCR stream |
-| `POST` | `/api/reprocess-page` | Re-runs AI restoration on a single specific page |
+| `POST` | `/api/reprocess-page` | Re-runs OCR restoration on a single specific page |
+| `POST` | `/api/key-pool-status` | Real-time key usage, tokens, and cooldown status |
+| `POST` | `/api/keys/verify` | Validates multiple API keys against Google's API |
+| `POST` | `/api/keys/reset-cooldowns`| Clears all cooldowns and unlocks all keys |
 | `GET` | `/api/logs` | Fetches historical backend telemetry logs |
 | `GET` | `/api/logs/stream` | Server-Sent Events (SSE) real-time log event stream |
 
@@ -158,4 +170,4 @@ export GEMINI_API_KEY="your-gemini-api-key-here"
 
 ## 📄 License
 
-This project is licensed under the MIT License.
+This project is licensed under the [MIT License](LICENSE).
