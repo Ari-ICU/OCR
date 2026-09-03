@@ -51,10 +51,11 @@ class APIKeyPool:
             self._cond.notify_all()
 
     def reset_cooldowns(self):
-        """Clears all cooldowns, daily exhausted states, and active leases for all keys."""
+        """Clears all cooldowns, daily exhausted states, usage counters, and active leases for all keys."""
         with self._lock:
             self._key_cooldowns.clear()
             self._key_daily_exhausted.clear()
+            self._key_usage_count.clear()
             self._active_leases.clear()
             self._lease_timestamps.clear()
             self._cond.notify_all()
@@ -253,9 +254,10 @@ class APIKeyPool:
             self._cond.notify_all()
 
     def mark_success(self, key: str):
-        """Clears cooldown if key succeeded and ensures lease is cleared."""
+        """Clears cooldown and daily cap if key succeeded and ensures lease is cleared."""
         with self._lock:
             self._key_cooldowns.pop(key, None)
+            self._key_daily_exhausted.pop(key, None)
             self._active_leases.discard(key)
             self._lease_timestamps.pop(key, None)
             self._cond.notify_all()
