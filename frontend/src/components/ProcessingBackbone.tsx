@@ -43,12 +43,16 @@ export const ProcessingBackbone: React.FC<ProcessingBackboneProps> = ({
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Live timer tracker
+  // Live timer tracker with persistent session storage
   useEffect(() => {
     if (isProcessing) {
       const startTime = Date.now() - elapsedSeconds * 1000;
       timerRef.current = setInterval(() => {
-        setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
+        const secs = Math.floor((Date.now() - startTime) / 1000);
+        setElapsedSeconds(secs);
+        try {
+          sessionStorage.setItem("khmerpdf_last_elapsed", String(secs));
+        } catch {}
       }, 1000);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -58,10 +62,25 @@ export const ProcessingBackbone: React.FC<ProcessingBackboneProps> = ({
     };
   }, [isProcessing]);
 
-  // Reset timer on new run
+  // Load last elapsed time on mount if idle
+  useEffect(() => {
+    if (!isProcessing && elapsedSeconds === 0) {
+      try {
+        const saved = sessionStorage.getItem("khmerpdf_last_elapsed");
+        if (saved && Number(saved) > 0) {
+          setElapsedSeconds(Number(saved));
+        }
+      } catch {}
+    }
+  }, [isProcessing]);
+
+  // Reset timer only when starting a fresh run from 0 completed pages
   useEffect(() => {
     if (isProcessing && completedPages === 0) {
       setElapsedSeconds(0);
+      try {
+        sessionStorage.removeItem("khmerpdf_last_elapsed");
+      } catch {}
     }
   }, [isProcessing, completedPages]);
 
@@ -186,7 +205,11 @@ export const ProcessingBackbone: React.FC<ProcessingBackboneProps> = ({
           <div>
             <div className="flex items-center space-x-2">
               <h3 className="font-bold text-white text-sm sm:text-base">
-                {isProcessing ? "AI Processing Pipeline Active" : "Extraction & Restoration Completed"}
+                {isProcessing
+                  ? "AI Processing Pipeline Active"
+                  : completedPages === totalPages && totalPages > 0
+                  ? "All Pages Fully Restored"
+                  : `Batch Finished (${completedPages} / ${totalPages} Pages)`}
               </h3>
               <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/25 font-bold font-mono">
                 {percent}%
@@ -195,7 +218,9 @@ export const ProcessingBackbone: React.FC<ProcessingBackboneProps> = ({
             <p className="text-xs text-slate-400 pt-0.5">
               {isProcessing
                 ? `Extracting Khmer Unicode & LaTeX formulas via ${selectedModel}`
-                : `All ${totalPages} pages ready for side-by-side KaTeX inspection and export.`}
+                : completedPages === totalPages && totalPages > 0
+                ? `All ${totalPages} pages ready for side-by-side KaTeX inspection and export.`
+                : `${completedPages} of ${totalPages} pages processed. Set page range or click Process to continue next pages.`}
             </p>
           </div>
         </div>
