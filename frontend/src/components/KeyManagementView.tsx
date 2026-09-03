@@ -43,7 +43,7 @@ interface KeyPoolItem {
   id: number;
   alias: string;
   suffix: string;
-  status: "ready" | "in_flight" | "cooldown" | "daily_exhausted";
+  status: "ready" | "in_flight" | "cooldown" | "daily_exhausted" | "invalid" | "forbidden";
   cooldown_remaining_seconds: number;
   usage_count: number;
   daily_limit?: number;
@@ -206,7 +206,20 @@ export const KeyManagementView: React.FC<KeyManagementViewProps> = ({
       if (res.ok) {
         const data = await res.json();
         setVerificationResults(data.results || []);
-        handleSetActiveSubTab("verify");
+        
+        // Also refresh pool status to immediately reflect live Google statuses on all cards
+        try {
+          const statusRes = await fetch(`${API_BASE_URL}/api/key-pool-status`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ api_key: localKey }),
+          });
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            if (statusData.pool) setKeyPoolItems(statusData.pool);
+            if (statusData.summary) setKeyPoolSummary(statusData.summary);
+          }
+        } catch {}
       }
     } catch {
       // Backend error
@@ -281,7 +294,16 @@ export const KeyManagementView: React.FC<KeyManagementViewProps> = ({
   }, [keyPoolItems, keyFilter, searchKey]);
 
   const readyCount = keyPoolItems.filter((k) => k.status === "ready" || k.status === "in_flight").length;
-  const cooldownCount = keyPoolItems.filter((k) => k.status === "cooldown" || k.status === "daily_exhausted").length;
+  const dailyCapCount = keyPoolItems.filter((k) => k.status === "daily_exhausted").length;
+  const cooldownCount = keyPoolItems.filter((k) => k.status === "cooldown").length;
+  const invalidCount = keyPoolItems.filter((k) => k.status === "invalid" || k.status === "forbidden").length;
+  
+  const totalPoolCount = keyPoolItems.length > 0 ? keyPoolItems.length : activeKeyCount;
+
+  const totalLiveRemaining = useMemo(() => {
+    if (keyPoolItems.length === 0) return totalPoolCount * 20;
+    return keyPoolItems.reduce((acc, k) => acc + (k.daily_remaining !== undefined ? k.daily_remaining : 20), 0);
+  }, [keyPoolItems, totalPoolCount]);
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-12 animate-in fade-in duration-200">
@@ -325,7 +347,7 @@ export const KeyManagementView: React.FC<KeyManagementViewProps> = ({
           </div>
           <div className="text-2xl font-black text-white font-mono">
             {totalUsage}
-            <span className="text-xs font-normal text-slate-500 ml-1">/ {activeKeyCount * 20}</span>
+            <span className="text-xs font-normal text-slate-500 ml-1">/ {totalPoolCount * 20}</span>
           </div>
           <p className="text-[11px] text-slate-500">Across all pool keys today</p>
         </div>
@@ -343,26 +365,28 @@ export const KeyManagementView: React.FC<KeyManagementViewProps> = ({
 
         <div className="p-4 rounded-2xl bg-[#0D1322] border border-slate-800/80 shadow-md space-y-1">
           <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
-            <span>Ready Keys</span>
+            <span>Ready on Google</span>
             <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
           </div>
           <div className="text-2xl font-black text-emerald-400 font-mono">
-            {readyCount > 0 ? readyCount : activeKeyCount}
-            <span className="text-xs font-normal text-slate-500 ml-1">/ {activeKeyCount} keys</span>
+            {readyCount}
+            <span className="text-xs font-normal text-slate-500 ml-1">/ {totalPoolCount} keys</span>
           </div>
-          <p className="text-[11px] text-emerald-400/80">Healthy keys ready to work</p>
+          <p className="text-[11px] text-emerald-400/80">
+            {dailyCapCount > 0 ? `${dailyCapCount} keys at daily cap` : "Healthy keys ready to work"}
+          </p>
         </div>
 
         <div className="p-4 rounded-2xl bg-[#0D1322] border border-slate-800/80 shadow-md space-y-1">
           <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
-            <span>Remaining Quota</span>
+            <span>Live Quota Remaining</span>
             <Clock className="h-4 w-4 text-emerald-400" />
           </div>
           <div className="text-2xl font-black text-emerald-400 font-mono">
-            ~{Math.max(0, activeKeyCount * 20 - totalUsage).toLocaleString()}
+            {totalLiveRemaining.toLocaleString()}
             <span className="text-xs font-normal text-slate-500 ml-1">page/day</span>
           </div>
-          <p className="text-[11px] text-slate-500">~{activeKeyCount * 15} requests / min (RPM)</p>
+          <p className="text-[11px] text-slate-500">⏰ Google resets at 2:00 PM ICT</p>
         </div>
       </div>
 
@@ -451,11 +475,11 @@ export const KeyManagementView: React.FC<KeyManagementViewProps> = ({
                 <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                   <span className="flex items-center space-x-1.5 text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 rounded-xl">
                     <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span>{activeKeyCount} Keys in Pool</span>
+                    <span>{totalPoolCount} Keys in Pool</span>
                   </span>
 
                   <span className="text-xs font-mono text-slate-400 bg-slate-800/80 border border-slate-700/60 px-3 py-1.5 rounded-xl">
-                    ⚡ Capacity: ~{activeKeyCount * 20} Pages/Day ({activeKeyCount * 15} RPM)
+                    ⚡ Capacity: ~{totalPoolCount * 20} Pages/Day ({totalPoolCount * 15} RPM)
                   </span>
                 </div>
 
@@ -506,6 +530,34 @@ export const KeyManagementView: React.FC<KeyManagementViewProps> = ({
                 </div>
 
                 <div className="flex items-center space-x-2 flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleVerifyAllKeys}
+                    disabled={isVerifying || activeKeyCount === 0}
+                    className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/35 text-indigo-300 border border-indigo-500/40 text-xs font-bold font-mono transition shadow-sm active:scale-95 cursor-pointer disabled:opacity-50"
+                    title="Probe Google servers live to test validity and check 20/day quota"
+                  >
+                    {isVerifying ? (
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin text-indigo-400" />
+                    ) : (
+                      <Zap className="h-3.5 w-3.5 text-amber-400 fill-amber-400" />
+                    )}
+                    <span>{isVerifying ? "Checking Google..." : "Live Google Quota Check"}</span>
+                  </button>
+
+                  {invalidCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveInvalidKeys}
+                      disabled={isVerifying}
+                      className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-bold font-mono transition cursor-pointer"
+                      title="Purge all suspended/invalid keys from your pool"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span>Remove Invalid ({invalidCount})</span>
+                    </button>
+                  )}
+
                   {cooldownCount > 0 && (
                     <button
                       type="button"
@@ -569,6 +621,7 @@ export const KeyManagementView: React.FC<KeyManagementViewProps> = ({
                   const isInFlight = item.status === "in_flight";
                   const isCooldown = item.status === "cooldown";
                   const isDaily = item.status === "daily_exhausted";
+                  const isInvalid = item.status === "invalid" || item.status === "forbidden";
 
                   return (
                     <div
@@ -576,11 +629,15 @@ export const KeyManagementView: React.FC<KeyManagementViewProps> = ({
                       className={`p-3.5 rounded-2xl border transition-all space-y-2.5 ${
                         isInFlight
                           ? "bg-indigo-500/10 border-indigo-500/40 shadow-md shadow-indigo-500/10 ring-1 ring-indigo-500/30"
+                          : isDaily
+                          ? "bg-rose-950/20 border-rose-500/40"
+                          : isInvalid
+                          ? "bg-red-950/30 border-red-500/30 opacity-70"
                           : isReady
                           ? "bg-[#070A12] border-slate-800/90 hover:border-slate-700"
                           : isCooldown
                           ? "bg-amber-500/5 border-amber-500/25"
-                          : "bg-rose-500/5 border-rose-500/25"
+                          : "bg-slate-900 border-slate-800"
                       }`}
                     >
                       <div className="flex items-center justify-between">
@@ -600,19 +657,23 @@ export const KeyManagementView: React.FC<KeyManagementViewProps> = ({
                               <RefreshCw className="h-2.5 w-2.5 animate-spin" />
                               <span>In-Flight</span>
                             </span>
+                          ) : isInvalid ? (
+                            <span className="inline-flex items-center space-x-1 text-[10px] font-mono font-bold text-red-300 bg-red-500/15 border border-red-500/30 px-2 py-0.5 rounded-full">
+                              <span>⛔ Suspended</span>
+                            </span>
+                          ) : isDaily ? (
+                            <span className="inline-flex items-center space-x-1 text-[10px] font-mono font-bold text-rose-300 bg-rose-500/20 border border-rose-500/40 px-2 py-0.5 rounded-full">
+                              <span>⚡ 20/20 on Google</span>
+                            </span>
                           ) : isReady ? (
                             <span className="inline-flex items-center space-x-1 text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full">
                               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
                               <span>Ready</span>
                             </span>
-                          ) : isCooldown ? (
+                          ) : (
                             <span className="inline-flex items-center space-x-1 text-[10px] font-mono font-bold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-full">
                               <Clock className="h-2.5 w-2.5" />
                               <span>{item.cooldown_remaining_seconds}s</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center space-x-1 text-[10px] font-mono font-bold text-rose-300 bg-rose-500/15 border border-rose-500/30 px-2 py-0.5 rounded-full">
-                              <span>Daily Cap</span>
                             </span>
                           )}
                         </div>
@@ -624,8 +685,8 @@ export const KeyManagementView: React.FC<KeyManagementViewProps> = ({
                           <span className="text-[10px] text-slate-400">Requests:</span>
                           <span className="font-bold text-slate-200">
                             {item.usage_count || 0} / {item.daily_limit || 20}
-                            <span className="text-[10px] text-emerald-400 ml-1 font-semibold">
-                              ({item.daily_remaining !== undefined ? item.daily_remaining : 20} left)
+                            <span className={`text-[10px] ml-1 font-semibold ${isDaily || isInvalid ? "text-rose-400" : "text-emerald-400"}`}>
+                              ({isDaily ? "0 left (Resets 2 PM)" : isInvalid ? "invalid" : `${item.daily_remaining !== undefined ? item.daily_remaining : 20} left`})
                             </span>
                           </span>
                         </div>
@@ -634,13 +695,15 @@ export const KeyManagementView: React.FC<KeyManagementViewProps> = ({
                         <div className="w-full bg-slate-800/80 rounded-full h-1.5 overflow-hidden">
                           <div
                             className={`h-full transition-all duration-300 ${
-                              (item.usage_count || 0) >= (item.daily_limit || 20)
-                                ? "bg-rose-500"
+                              isDaily || (item.usage_count || 0) >= (item.daily_limit || 20)
+                                ? "bg-rose-500 w-full"
+                                : isInvalid
+                                ? "bg-red-500/50 w-full"
                                 : (item.usage_count || 0) > 15
                                 ? "bg-amber-400"
                                 : "bg-indigo-500"
                             }`}
-                            style={{
+                            style={isDaily || isInvalid ? { width: "100%" } : {
                               width: `${Math.min(100, Math.max(3, ((item.usage_count || 0) / (item.daily_limit || 20)) * 100))}%`,
                             }}
                           />

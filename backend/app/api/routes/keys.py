@@ -17,58 +17,42 @@ class VerifyKeysRequest(BaseModel):
 
 
 def verify_single_key(api_key: str) -> Dict[str, Any]:
-    """Tests an API key live against Google's Generative Language API endpoint."""
+    """Tests an API key live against Google's Generative Language API endpoint and checks real-time quota."""
     suffix = api_key[-4:] if len(api_key) >= 4 else "key"
-    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+    
+    # 1. Quick test against models endpoint to verify key authentication
+    url_models = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Gemini-Verifier"})
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            if resp.status == 200:
-                return {
-                    "key": api_key,
-                    "suffix": suffix,
-                    "valid": True,
-                    "status": "active",
-                    "message": "Valid & Active Google Gemini Key"
-                }
-    except urllib.error.HTTPError as e:
-        error_body = ""
-        try:
-            error_body = e.read().decode("utf-8")
-        except Exception:
+        req = urllib.request.Request(url_models, headers={"User-Agent": "Gemini-Verifier"})
+        with urllib.request.urlopen(req, timeout=6) as resp:
             pass
-        
-        if e.code == 400:
+    except urllib.error.HTTPError as e:
+        if e.code in (400, 401):
+            key_pool.mark_invalid(api_key)
             return {
                 "key": api_key,
                 "suffix": suffix,
                 "valid": False,
                 "status": "invalid",
-                "message": "API key not valid / not found on Google servers"
+                "message": "Invalid API Key (Not found on Google servers)"
             }
         elif e.code == 403:
+            key_pool.mark_invalid(api_key)
             return {
                 "key": api_key,
                 "suffix": suffix,
                 "valid": False,
                 "status": "forbidden",
-                "message": "Permission denied / Key access denied or suspended by Google"
+                "message": "Key Suspended or Access Denied by Google (403)"
             }
-        elif e.code == 429:
+        elif e.code != 429:
             return {
                 "key": api_key,
                 "suffix": suffix,
-                "valid": True,
-                "status": "rate_limited",
-                "message": "Valid Google Key (Rate limit / Quota currently active)"
+                "valid": False,
+                "status": "error",
+                "message": f"HTTP {e.code}: {e.reason}"
             }
-        return {
-            "key": api_key,
-            "suffix": suffix,
-            "valid": False,
-            "status": "error",
-            "message": f"HTTP {e.code}: {e.reason}"
-        }
     except Exception as e:
         return {
             "key": api_key,
@@ -77,18 +61,84 @@ def verify_single_key(api_key: str) -> Dict[str, Any]:
             "status": "network_error",
             "message": str(e)
         }
+
+    # 2. Live Generation Quota Probe on gemini-3.6-flash (Checks if 20/day limit was reached on Google)
+    url_generate = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={api_key}"
+    payload = json.dumps({
+        "contents": [{"parts": [{"text": "ping"}]}],
+        "generationConfig": {"maxOutputTokens": 1}
+    }).encode("utf-8")
+    
+    try:
+        req = urllib.request.Request(
+            url_generate,
+            data=payload,
+            headers={"Content-Type": "application/json", "User-Agent": "QuotaChecker"}
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            if resp.status == 200:
+                key_pool.mark_success(api_key)
+                return {
+                    "key": api_key,
+                    "suffix": suffix,
+                    "valid": True if resp.status == 200 else False,
+                    "status": "ready",
+                    "message": "✅ Active & Has Free Quota Available"
+                }
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", errors="ignore")
+        except Exception:
+            pass
+
+        if e.code == 429 or "RESOURCE_EXHAUSTED" in body:
+            is_daily = "generaterequestsperday" in body.lower() or "limit: 20" in body.lower() or "limit: 1500" in body.lower()
+            key_pool.mark_rate_limited(api_key, cooldown_seconds=60.0, is_daily=is_daily)
+            return {
+                "key": api_key,
+                "suffix": suffix,
+                "valid": True,
+                "status": "daily_exhausted" if is_daily else "cooldown",
+                "message": "⚡ Daily Limit (20/20) Reached on Google" if is_daily else "🔄 Temporary Rate Limit Cooldown"
+            }
+        elif e.code in (400, 401, 403):
+            key_pool.mark_invalid(api_key)
+            return {
+                "key": api_key,
+                "suffix": suffix,
+                "valid": False,
+                "status": "invalid" if e.code != 403 else "forbidden",
+                "message": "Key Rejected by Google (Unauthenticated / Suspended)"
+            }
+        return {
+            "key": api_key,
+            "suffix": suffix,
+            "valid": True,
+            "status": "active",
+            "message": f"Valid Key (HTTP {e.code})"
+        }
+    except Exception as e:
+        return {
+            "key": api_key,
+            "suffix": suffix,
+            "valid": True,
+            "status": "active",
+            "message": f"Valid Key ({str(e)[:40]})"
+        }
+
     return {
         "key": api_key,
         "suffix": suffix,
-        "valid": False,
-        "status": "unknown",
-        "message": "Unknown verification failure"
+        "valid": True,
+        "status": "ready",
+        "message": "✅ Active & Ready"
     }
 
 
 @router.post("/verify")
 def verify_keys_endpoint(req: VerifyKeysRequest):
-    """Verifies a list of Gemini API keys live and returns their health and validity status."""
+    """Verifies a list of Gemini API keys live against Google API and detects real daily quota status."""
     results = []
     for k in req.keys:
         k_clean = k.strip()

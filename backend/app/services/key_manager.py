@@ -65,16 +65,14 @@ class APIKeyPool:
         return cleaned
 
     def get_candidate_keys(self, user_keys_raw: Optional[str | List[str]] = None) -> List[str]:
-        """Returns the list of usable keys, combining user-provided keys with valid default keys."""
+        """Returns the list of usable keys: user-provided keys if passed, or default keys from .env."""
         from app.core.config import settings
         user_keys = self.parse_keys(user_keys_raw)
+        if user_keys:
+            return [k for k in user_keys if k and k not in self._key_permanently_invalid]
+            
         default_keys = self.parse_keys([settings.DEFAULT_API_KEY] + self._default_keys)
-        
-        combined = []
-        for k in user_keys + default_keys:
-            if k and k not in combined and k not in self._key_permanently_invalid:
-                combined.append(k)
-        return combined
+        return [k for k in default_keys if k and k not in self._key_permanently_invalid]
 
     def get_next_key(
         self,
@@ -198,7 +196,13 @@ class APIKeyPool:
         with self._lock:
             statuses = []
             for i, k in enumerate(keys):
-                if k in self._key_daily_exhausted and self._key_daily_exhausted[k] > now:
+                is_daily = (k in self._key_daily_exhausted and self._key_daily_exhausted[k] > now)
+                is_invalid = (k in self._key_permanently_invalid)
+                
+                if is_invalid:
+                    status = "invalid"
+                    remaining = 0
+                elif is_daily:
                     status = "daily_exhausted"
                     remaining = int(self._key_daily_exhausted[k] - now)
                 elif k in self._key_cooldowns and self._key_cooldowns[k] > now:
@@ -212,6 +216,11 @@ class APIKeyPool:
                     remaining = 0
 
                 usage = self._key_usage_count.get(k, 0)
+                if is_daily:
+                    usage = max(20, usage)
+                
+                daily_rem = 0 if (is_daily or is_invalid) else max(0, 20 - usage)
+
                 statuses.append({
                     "id": i + 1,
                     "alias": f"Key {i + 1}",
@@ -220,7 +229,7 @@ class APIKeyPool:
                     "cooldown_remaining_seconds": remaining,
                     "usage_count": usage,
                     "daily_limit": 20,
-                    "daily_remaining": max(0, 20 - usage),
+                    "daily_remaining": daily_rem,
                     "tokens_used": self._key_token_count.get(k, 0)
                 })
             return statuses
