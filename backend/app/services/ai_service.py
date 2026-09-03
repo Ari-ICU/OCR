@@ -187,10 +187,9 @@ class AIService:
                 if key_alias not in tried_aliases:
                     tried_aliases.append(key_alias)
 
-                client = cls.get_gemini_client(current_key)
-
                 try:
                     try:
+                        client = cls.get_gemini_client(current_key)
                         call_start = time.time()
                         response = client.models.generate_content(
                             model=model_name,
@@ -283,19 +282,20 @@ class AIService:
                                 page_number=page_number,
                                 details={"attempt": attempt, "key_alias": key_alias, "action": "instant_failover"}
                             )
-                            time.sleep(1.2)  # Safe spacing before leasing next key in pool
+                            time.sleep(1.0)
                             continue
                         else:
-                            sleep_duration = min(wait_time, 20.0)
+                            cooldown_left = key_pool.get_min_cooldown_remaining(api_key)
+                            sleep_duration = max(3.0, min(cooldown_left if cooldown_left > 0 else wait_time, 45.0))
                             log_manager.emit(
                                 level="RATE_LIMIT",
                                 event="RATE_LIMIT_HIT",
-                                message=f"⏳ [Key Pool Busy] All {pool_size} key(s) are cooling down for '{model_name}'. Pausing {sleep_duration:.0f}s before retry for Page {page_number}...",
+                                message=f"⏳ [Key Pool Cooling Down] All {pool_size} key(s) cooling for '{model_name}'. Waiting {sleep_duration:.0f}s for key reset before resuming Page {page_number}...",
                                 model=model_name,
                                 page_number=page_number,
                                 details={"attempt": attempt, "wait_seconds": sleep_duration, "keys_tried": tried_aliases}
                             )
-                            time.sleep(sleep_duration)
+                            key_pool.wait_for_any_key_ready(api_key, timeout=sleep_duration)
                             tried_keys.clear()
                     else:
                         is_503 = ("503" in last_error or "UNAVAILABLE" in last_error or "high demand" in last_error.lower())
@@ -416,10 +416,9 @@ class AIService:
                 if key_alias not in tried_aliases:
                     tried_aliases.append(key_alias)
 
-                client = cls.get_gemini_client(current_key)
-
                 try:
                     try:
+                        client = cls.get_gemini_client(current_key)
                         call_start = time.time()
                         response = client.models.generate_content(
                             model=model_name,
@@ -509,19 +508,20 @@ class AIService:
                                 page_number=page_number,
                                 details={"attempt": attempt, "key_alias": key_alias, "action": "instant_failover"}
                             )
-                            time.sleep(1.2)  # Safe spacing before leasing next key in pool
+                            time.sleep(1.0)
                             continue
                         else:
-                            sleep_duration = min(wait_time, 20.0)
+                            cooldown_left = key_pool.get_min_cooldown_remaining(api_key)
+                            sleep_duration = max(3.0, min(cooldown_left if cooldown_left > 0 else wait_time, 45.0))
                             log_manager.emit(
                                 level="RATE_LIMIT",
                                 event="RATE_LIMIT_HIT",
-                                message=f"⏳ [Key Pool Busy] All {pool_size} key(s) are cooling down for '{model_name}'. Pausing {sleep_duration:.0f}s before retry for Page {page_number}...",
+                                message=f"⏳ [Key Pool Cooling Down] All {pool_size} key(s) cooling for '{model_name}'. Waiting {sleep_duration:.0f}s for key reset before resuming Page {page_number}...",
                                 model=model_name,
                                 page_number=page_number,
                                 details={"attempt": attempt, "wait_seconds": sleep_duration, "keys_tried": tried_aliases}
                             )
-                            time.sleep(sleep_duration)
+                            key_pool.wait_for_any_key_ready(api_key, timeout=sleep_duration)
                             tried_keys.clear()
                     else:
                         is_503 = ("503" in last_error or "UNAVAILABLE" in last_error or "high demand" in last_error.lower())

@@ -139,10 +139,13 @@ def verify_single_key(api_key: str) -> Dict[str, Any]:
 @router.post("/verify")
 def verify_keys_endpoint(req: VerifyKeysRequest):
     """Verifies a list of Gemini API keys live against Google API and detects real daily quota status."""
+    import time
     results = []
-    for k in req.keys:
+    for i, k in enumerate(req.keys):
         k_clean = k.strip()
         if k_clean and len(k_clean) > 5:
+            if i > 0:
+                time.sleep(0.25)  # Gentle pacing to avoid burst 429s during verification
             results.append(verify_single_key(k_clean))
     return {"results": results}
 

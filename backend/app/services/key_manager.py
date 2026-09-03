@@ -12,6 +12,7 @@ class APIKeyPool:
         self._cond = threading.Condition(self._lock)
         self._default_keys: List[str] = [k.strip() for k in (default_keys or []) if k and k.strip()]
         self._active_leases: Set[str] = set()  # Keys currently executing an in-flight API request
+        self._lease_timestamps: Dict[str, float] = {}  # key -> timestamp when lease was granted
         self._last_request_time: Dict[str, float] = {}  # key -> timestamp of last request start
         self._key_cooldowns: Dict[str, float] = {}  # key -> cooldown_expiry_timestamp
         self._key_daily_exhausted: Dict[str, float] = {}  # key -> daily_expiry_timestamp
@@ -19,13 +20,24 @@ class APIKeyPool:
         self._key_usage_count: Dict[str, int] = {}
         self._key_token_count: Dict[str, int] = {}
         self._round_robin_idx: int = 0
-        self._min_key_spacing_seconds: float = 1.2  # Smooth request pacing to prevent burst 429s
+        self._min_key_spacing_seconds: float = 1.0  # Smooth request pacing to prevent burst 429s
+
+    def _cleanup_stale_leases(self, max_lease_age: float = 45.0):
+        """Internal helper: automatically clears any active lease older than 45s to avoid UI freeze."""
+        now = time.time()
+        stale = [k for k in self._active_leases if now - self._lease_timestamps.get(k, 0) > max_lease_age]
+        for k in stale:
+            self._active_leases.discard(k)
+            self._lease_timestamps.pop(k, None)
+        if stale:
+            self._cond.notify_all()
 
     def mark_invalid(self, key: str):
         """Permanently evicts a suspended or invalid key from the active pool."""
         with self._lock:
             self._key_permanently_invalid.add(key)
             self._active_leases.discard(key)
+            self._lease_timestamps.pop(key, None)
             self._cond.notify_all()
 
     def reset_invalid(self):
@@ -34,13 +46,17 @@ class APIKeyPool:
             self._key_permanently_invalid.clear()
             self._key_cooldowns.clear()
             self._key_daily_exhausted.clear()
+            self._active_leases.clear()
+            self._lease_timestamps.clear()
             self._cond.notify_all()
 
     def reset_cooldowns(self):
-        """Clears all cooldowns and daily exhausted states for all keys."""
+        """Clears all cooldowns, daily exhausted states, and active leases for all keys."""
         with self._lock:
             self._key_cooldowns.clear()
             self._key_daily_exhausted.clear()
+            self._active_leases.clear()
+            self._lease_timestamps.clear()
             self._cond.notify_all()
 
     @staticmethod
@@ -74,6 +90,47 @@ class APIKeyPool:
         default_keys = self.parse_keys([settings.DEFAULT_API_KEY] + self._default_keys)
         return [k for k in default_keys if k and k not in self._key_permanently_invalid]
 
+    def get_min_cooldown_remaining(self, user_keys_raw: Optional[str | List[str]] = None) -> float:
+        """Returns the minimum seconds until the earliest key cooldown expires."""
+        keys = self.get_candidate_keys(user_keys_raw)
+        if not keys:
+            return 0.0
+        now = time.time()
+        with self._lock:
+            self._cleanup_stale_leases()
+            # Look at non-daily exhausted keys first
+            candidates = [k for k in keys if self._key_daily_exhausted.get(k, 0) <= now]
+            if not candidates:
+                candidates = keys
+            
+            rem_times = [max(0.0, self._key_cooldowns.get(k, 0) - now) for k in candidates]
+            return min(rem_times) if rem_times else 0.0
+
+    def wait_for_any_key_ready(self, user_keys_raw: Optional[str | List[str]] = None, timeout: float = 30.0) -> bool:
+        """Waits on condition variable until at least one key is ready or timeout expires."""
+        with self._lock:
+            self._cleanup_stale_leases()
+            keys = self.get_candidate_keys(user_keys_raw)
+            if not keys:
+                return True
+            now = time.time()
+            has_ready = any(
+                k not in self._active_leases and
+                self._key_cooldowns.get(k, 0) <= now and
+                self._key_daily_exhausted.get(k, 0) <= now
+                for k in keys
+            )
+            if has_ready:
+                return True
+            self._cond.wait(timeout=max(0.5, timeout))
+            now = time.time()
+            return any(
+                k not in self._active_leases and
+                self._key_cooldowns.get(k, 0) <= now and
+                self._key_daily_exhausted.get(k, 0) <= now
+                for k in keys
+            )
+
     def get_next_key(
         self,
         user_keys_raw: Optional[str | List[str]] = None,
@@ -93,6 +150,7 @@ class APIKeyPool:
         deadline = time.time() + timeout
 
         with self._lock:
+            self._cleanup_stale_leases()
             while True:
                 now = time.time()
                 # 1. First priority: healthy keys that are NOT currently in-flight by another thread
@@ -109,6 +167,7 @@ class APIKeyPool:
                     selected_key = idle_healthy_keys[self._round_robin_idx % len(idle_healthy_keys)]
                     self._round_robin_idx = (self._round_robin_idx + 1) % max(1, len(keys))
                     self._active_leases.add(selected_key)
+                    self._lease_timestamps[selected_key] = time.time()
                     self._key_usage_count[selected_key] = self._key_usage_count.get(selected_key, 0) + 1
                     break
 
@@ -124,6 +183,7 @@ class APIKeyPool:
                 time_left = deadline - time.time()
                 if in_flight_healthy and time_left > 0.5:
                     self._cond.wait(timeout=min(2.0, time_left))
+                    self._cleanup_stale_leases()
                     continue
 
                 # 3. If all candidate keys are on cooldown, pick the one expiring soonest (not daily exhausted and not in-flight)
@@ -139,6 +199,7 @@ class APIKeyPool:
                 sorted_keys = sorted(available, key=lambda k: (1 if k in self._active_leases else 0, self._key_cooldowns.get(k, 0)))
                 selected_key = sorted_keys[0]
                 self._active_leases.add(selected_key)
+                self._lease_timestamps[selected_key] = time.time()
                 self._key_usage_count[selected_key] = self._key_usage_count.get(selected_key, 0) + 1
                 break
 
@@ -164,6 +225,7 @@ class APIKeyPool:
             return
         with self._lock:
             self._active_leases.discard(key)
+            self._lease_timestamps.pop(key, None)
             self._cond.notify_all()
 
     def record_key_tokens(self, key: str, tokens: int):
@@ -180,20 +242,23 @@ class APIKeyPool:
             else:
                 self._key_cooldowns[key] = max(self._key_cooldowns.get(key, 0), now + cooldown_seconds)
             self._active_leases.discard(key)
+            self._lease_timestamps.pop(key, None)
             self._cond.notify_all()
 
     def mark_success(self, key: str):
-        """Clears cooldown if key succeeded."""
+        """Clears cooldown if key succeeded and ensures lease is cleared."""
         with self._lock:
-            now = time.time()
-            if key in self._key_cooldowns and self._key_cooldowns[key] <= now:
-                del self._key_cooldowns[key]
+            self._key_cooldowns.pop(key, None)
+            self._active_leases.discard(key)
+            self._lease_timestamps.pop(key, None)
+            self._cond.notify_all()
 
     def get_status_detailed(self, user_keys_raw: Optional[str | List[str]] = None) -> List[Dict[str, Any]]:
         """Returns detailed real-time health, in-flight status, cooldown countdown, and tokens for each key."""
         keys = self.get_candidate_keys(user_keys_raw)
         now = time.time()
         with self._lock:
+            self._cleanup_stale_leases()
             statuses = []
             for i, k in enumerate(keys):
                 is_daily = (k in self._key_daily_exhausted and self._key_daily_exhausted[k] > now)
