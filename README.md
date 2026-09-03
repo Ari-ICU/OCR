@@ -32,10 +32,10 @@ An enterprise-grade, high-performance system for extracting, digitizing, and res
 
 ## 🌟 Key Features
 
-- 🇰🇭 **High-Accuracy Multimodal Khmer OCR**: Powered by Google Gemini 3.6 Flash and Gemini 3.5 Flash. Accurately preserves consonant sub-clusters (ជើង), complex vowels, diacritics, and legacy font encodings.
+- 🇰🇭 **High-Accuracy Multimodal Khmer OCR**: Powered by Google Gemini 3.7 Flash, Gemini 3.6 Flash, and Gemini 3.5 Flash. Accurately preserves consonant sub-clusters (ជើង), complex vowels, diacritics, and legacy font encodings.
 - 📐 **100% LaTeX Mathematical & Scientific Restoration**: Automatically detects, formats, and renders complex formulas ($...$, $$...$$, fractions, square roots, matrices, chemistry equations) into KaTeX LaTeX.
 - 🔑 **Multi-Account API Key Pool & Load Balancer**: Supports adding multiple Gemini API keys. The engine automatically rotates keys using round-robin scheduling, mutual exclusion pacing, and instant 429 quota failover.
-- ⚡ **Zero-Downtime Auto-Failover**: When a key hits the 20 requests/day cap on `gemini-3.6-flash`, the system automatically switches to `gemini-3.5-flash` or leases the next key in the pool with zero downtime.
+- ⚡ **Zero-Downtime 3-Tier Cascade**: When a key hits the 20 requests/day cap on `gemini-3.7-flash`, the system automatically rotates keys or cascades down through `gemini-3.6-flash` and `gemini-3.5-flash` with zero downtime.
 - 📊 **Real-Time Key Usage Dashboard**: Live telemetry tracking requests processed, tokens consumed, active cooldown countdowns, and remaining daily quota for every key.
 - 🔄 **Real-Time SSE Streaming**: Live parallel page processing with visual worker chips (`P1`, `P2`), thumbnail previews, and instant page-by-page rendering.
 - 🛡️ **Live API Key Verification & Auto-Purge**: Built-in verification tool that tests all keys against Google's API simultaneously and allows 1-click purging of invalid or deleted keys.
@@ -148,21 +148,21 @@ npm run dev
 
 ## 🔑 Multi-Key Scaling & Rate Limit Management
 
-Google Gemini provides a free tier of **20 requests/day per key** for `gemini-3.6-flash` and **15 RPM (Requests Per Minute)**.
+Google Gemini provides a free tier of **20 requests/day per key per model** and **15 RPM (Requests Per Minute)**.
 
-Adding multiple keys to your pool multiplies your daily extraction speed:
+By leveraging our **3-Tier Cascade (`gemini-3.7-flash` -> `gemini-3.6-flash` -> `gemini-3.5-flash`)**, each key provides **60 requests / day**:
 
-| Keys in Pool | Daily Free Capacity | Throughput (RPM) | Recommended Parallel Workers |
-| :---: | :---: | :---: | :---: |
-| **1 Key** | ~20 pages/day | 15 RPM | 1-2 workers |
-| **5 Keys** | ~100 pages/day | 75 RPM | 2-3 workers |
-| **10 Keys** | ~200 pages/day | 150 RPM | 3-4 workers |
-| **30 Keys** | ~600 pages/day | 450 RPM | 4-6 workers |
+| Keys in Pool | 1 Model (20 RPD) | 3-Tier Multi-Model Pool (60 RPD) | Peak Throughput | Recommended Parallel Workers |
+| :---: | :---: | :---: | :---: | :---: |
+| **1 Key** | ~20 pages/day | **~60 pages/day** | 15 RPM | 1-2 workers |
+| **10 Keys** | ~200 pages/day | **~600 pages/day** | 150 RPM | 2-3 workers |
+| **30 Keys** | ~600 pages/day | **~1,800 pages/day** | 450 RPM | 3-4 workers |
+| **56 Keys** | ~1,120 pages/day | **🔥 ~3,360 pages/day** | 840 RPM | 3-5 workers |
 
-### Automatic Failover Logic:
-1. When a key is busy, the pool leases the next idle key.
-2. If a key hits a temporary 429 rate limit, it is placed on a short cooldown (e.g. 30s) and the engine automatically retries with a replacement key.
-3. If a key reaches its 20-request daily cap on `gemini-3.6-flash`, the engine automatically switches that key to **`gemini-3.5-flash`** so your document extraction finishes without interruption.
+### Automatic 2-Stage Failover Logic:
+1. **Key Rotation (Quality First):** The engine processes pages with **Gemini 3.7 Flash**, rotating sequentially across keys #1 to #56.
+2. **Model Cascade (Zero Downtime):** When keys exhaust their 20/20 limit on 3.7, the engine automatically rolls over to **Gemini 3.6 Flash** (+1,120 pages), and then **Gemini 3.5 Flash** (+1,120 pages).
+3. **Paced Health Management:** Temporary 429 rate limits place a key on a short cooldown (e.g. 30s) while immediately routing subsequent pages to ready keys without blocking.
 
 ---
 
