@@ -20,8 +20,8 @@ class Settings:
     HUGGINGFACE_API_KEY: str = os.environ.get("HUGGINGFACE_API_KEY", "")
     DEFAULT_OLLAMA_URL: str = os.environ.get("OLLAMA_URL", "http://localhost:11434")
     
-    # Active high-performance Gemini models (4-Tier Cascade: 3.7 -> 3.6 -> 3.5 -> 2.5)
-    MODELS_TO_TRY: List[str] = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"]
+    # Active high-performance Gemini models (3-Tier Cascade: 3.7 -> 3.6 -> 3.5)
+    MODELS_TO_TRY: List[str] = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
 
     MODEL_METADATA: List[Dict[str, str]] = [
         {
@@ -41,12 +41,6 @@ class Settings:
             "name": "Gemini 3.5 Flash",
             "tag": "Google AI • High Throughput (#3)",
             "description": "Reliable high-throughput model with strong Khmer OCR and LaTeX formula restoration."
-        },
-        {
-            "id": "gemini-2.5-flash",
-            "name": "Gemini 2.5 Flash",
-            "tag": "Google AI • Ultra Fast (#4)",
-            "description": "Ultra-fast multimodal vision model ideal for rapid high-throughput OCR and fallback processing."
         }
     ]
 
