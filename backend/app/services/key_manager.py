@@ -68,7 +68,7 @@ class APIKeyPool:
         """Returns the list of usable keys, combining user-provided keys with valid default keys."""
         from app.core.config import settings
         user_keys = self.parse_keys(user_keys_raw)
-        default_keys = [k.strip() for k in [settings.DEFAULT_API_KEY] + self._default_keys if k and k.strip()]
+        default_keys = self.parse_keys([settings.DEFAULT_API_KEY] + self._default_keys)
         
         combined = []
         for k in user_keys + default_keys:

@@ -314,7 +314,7 @@ def convert_pdf_to_khmer(
                         client=client,
                         image_bytes=img_bytes,
                         page_number=page_num,
-                        models=[selected_model, "gemini-3.6-flash"]
+                        models=[selected_model, "gemini-3.5-flash"]
                     )
             else:
                 # Text extraction mode
@@ -332,7 +332,7 @@ def convert_pdf_to_khmer(
                         model=selected_model
                     )
                 else:
-                    models = [selected_model, "gemini-3.6-flash"]
+                    models = [selected_model, "gemini-3.5-flash"]
                     result_text = process_page_text_gemini(
                         client=client,
                         page_text=raw_page_text,

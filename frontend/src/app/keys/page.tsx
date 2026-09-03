@@ -23,7 +23,14 @@ export default function KeysPage() {
       if (savedOllama) setOllamaUrl(savedOllama);
 
       const savedModel = localStorage.getItem("khmerpdf_selected_model");
-      if (savedModel) setSelectedModel(savedModel);
+      if (savedModel) {
+        if (savedModel.includes("2.0") || savedModel.includes("1.5")) {
+          setSelectedModel("gemini-3.6-flash");
+          try { localStorage.setItem("khmerpdf_selected_model", "gemini-3.6-flash"); } catch {}
+        } else {
+          setSelectedModel(savedModel);
+        }
+      }
     } catch (e) {
       console.warn("Could not read localStorage", e);
     }

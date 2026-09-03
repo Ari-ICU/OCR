@@ -1,6 +1,14 @@
 import os
+from pathlib import Path
 from typing import List, Dict, Any
-from pydantic import BaseModel
+from dotenv import load_dotenv
+
+# Load .env from backend or root directory
+env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
+else:
+    load_dotenv()
 
 class Settings:
     PROJECT_NAME: str = "Khmer PDF & Vision AI Engine"

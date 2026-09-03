@@ -107,7 +107,7 @@ def get_key_pool_status(api_key: Optional[str] = None):
     total_tokens = sum(k.get("tokens_used", 0) for k in detailed)
     total_used_reqs = sum(k.get("usage_count", 0) for k in detailed)
     
-    # 20 requests/day per free tier project
+    # 20 requests/day per free tier project for gemini-3.6-flash
     total_daily_quota = len(candidate_keys) * 20 if candidate_keys else 20
     daily_remaining = max(0, total_daily_quota - total_used_reqs)
 

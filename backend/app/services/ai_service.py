@@ -90,8 +90,8 @@ def format_clean_error(raw_error: str, key_alias: str, model_name: str) -> str:
         return f"[{key_alias}] ⚠️ Google Server Overload (503 High Demand on '{model_name}'). Google's servers for this model are temporarily at capacity."
 
     if "429" in raw_error or "RESOURCE_EXHAUSTED" in raw_error or "quota" in raw_error.lower():
-        if "limit: 20" in raw_error or "GenerateRequestsPerDayPerProjectPerModel" in raw_error:
-            return f"[{key_alias}] ⚠️ Free-tier Daily Project Limit (20 RPD cap on '{model_name}') reached. Automatically switching to high-throughput models..."
+        if "generaterequestsperday" in raw_error.lower() or "generate_content_requests_per_day" in raw_error.lower():
+            return f"[{key_alias}] ⚠️ Free-tier Daily Project Limit (RPD cap on '{model_name}') reached. Automatically switching to backup key / fallback models..."
         
         match = re.search(r"retry in (\d+\.?\d*)s", raw_error, re.IGNORECASE)
         retry_msg = f" (Retry in {match.group(1)}s)" if match else ""
@@ -262,7 +262,7 @@ class AIService:
                         match = re.search(r"retry in (\d+\.?\d*)s", last_error, re.IGNORECASE)
                         wait_time = float(match.group(1)) + 1.0 if match else 30.0
                         err_lower = last_error.lower()
-                        is_daily = ("limit: 20" in err_lower or "generaterequestsperday" in err_lower) and "generaterequestsperminute" not in err_lower and "perminute" not in err_lower
+                        is_daily = ("generaterequestsperday" in err_lower or "generate_content_requests_per_day" in err_lower or "limit: 20" in err_lower or "limit: 1500" in err_lower) and "generaterequestsperminute" not in err_lower and "perminute" not in err_lower
 
                         if current_key:
                             key_pool.mark_rate_limited(current_key, cooldown_seconds=wait_time, is_daily=is_daily)
@@ -271,7 +271,7 @@ class AIService:
                         has_other_keys = (pool_size > 1 and len(set(tried_keys)) < pool_size)
                         if has_other_keys:
                             if is_daily:
-                                rate_msg = f"⚡ [Daily Cap (20/day) Reached] {key_alias} on '{model_name}'. Rotating to next replacement key for Page {page_number}..."
+                                rate_msg = f"⚡ [Daily Cap Reached] {key_alias} on '{model_name}'. Rotating to next replacement key for Page {page_number}..."
                             else:
                                 rate_msg = f"🔄 [Key Pacing Cooldown ({int(wait_time)}s)] {key_alias} on '{model_name}'. Instant Failover to next key in pool for Page {page_number}..."
                             
@@ -488,7 +488,7 @@ class AIService:
                         match = re.search(r"retry in (\d+\.?\d*)s", last_error, re.IGNORECASE)
                         wait_time = float(match.group(1)) + 1.0 if match else 30.0
                         err_lower = last_error.lower()
-                        is_daily = ("limit: 20" in err_lower or "generaterequestsperday" in err_lower) and "generaterequestsperminute" not in err_lower and "perminute" not in err_lower
+                        is_daily = ("generaterequestsperday" in err_lower or "generate_content_requests_per_day" in err_lower or "limit: 20" in err_lower or "limit: 1500" in err_lower) and "generaterequestsperminute" not in err_lower and "perminute" not in err_lower
 
                         if current_key:
                             key_pool.mark_rate_limited(current_key, cooldown_seconds=wait_time, is_daily=is_daily)
@@ -497,7 +497,7 @@ class AIService:
                         has_other_keys = (pool_size > 1 and len(set(tried_keys)) < pool_size)
                         if has_other_keys:
                             if is_daily:
-                                rate_msg = f"⚡ [Daily Cap (20/day) Reached] {key_alias} on '{model_name}'. Rotating to next replacement key for Page {page_number}..."
+                                rate_msg = f"⚡ [Daily Cap Reached] {key_alias} on '{model_name}'. Rotating to next replacement key for Page {page_number}..."
                             else:
                                 rate_msg = f"🔄 [Key Pacing Cooldown ({int(wait_time)}s)] {key_alias} on '{model_name}'. Instant Failover to next key in pool for Page {page_number}..."
 

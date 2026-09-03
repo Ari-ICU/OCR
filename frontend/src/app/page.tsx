@@ -147,7 +147,14 @@ export default function Home() {
       if (savedOllama) setOllamaUrl(savedOllama);
 
       const savedModel = localStorage.getItem("khmerpdf_selected_model");
-      if (savedModel) setSelectedModel(savedModel);
+      if (savedModel) {
+        if (savedModel.includes("2.0") || savedModel.includes("1.5")) {
+          setSelectedModel("gemini-3.6-flash");
+          try { localStorage.setItem("khmerpdf_selected_model", "gemini-3.6-flash"); } catch {}
+        } else {
+          setSelectedModel(savedModel);
+        }
+      }
 
       const savedCollapsed = localStorage.getItem("khmerpdf_collapsed_pages");
       if (savedCollapsed) {
