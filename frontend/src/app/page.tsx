@@ -564,6 +564,8 @@ export default function Home() {
                         tokens_used: data.already_completed ? p.tokens_used : ((data.tokens_used ?? 0) + (p.tokens_used || 0)),
                         success: data.already_completed ? p.success : (data.success ?? p.success),
                         error: data.already_completed ? p.error : data.error,
+                        is_blank: data.already_completed ? p.is_blank : (data.is_blank ?? (data.model_used === "blank-skipped")),
+                        is_english_skipped: data.already_completed ? p.is_english_skipped : (data.is_english_skipped ?? (data.model_used === "english-skipped")),
                         isProcessing: false,
                       }
                       : p
@@ -578,6 +580,8 @@ export default function Home() {
                     tokens_used: data.tokens_used || 0,
                     success: data.success,
                     error: data.error,
+                    is_blank: Boolean(data.is_blank || data.model_used === "blank-skipped"),
+                    is_english_skipped: Boolean(data.is_english_skipped || data.model_used === "english-skipped"),
                     isProcessing: false,
                   };
                   updated = [...prev, newP].sort((a, b) => a.page_number - b.page_number);

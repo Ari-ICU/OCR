@@ -13,22 +13,30 @@ from app.core.config import settings
 from app.services.log_service import log_manager
 from app.services.key_manager import key_pool
 from app.services.huggingface_service import HuggingFaceService
+from app.services.pdf_service import PDFService
 
 
 KHMER_VISION_PROMPT = r"""You are an expert Khmer OCR, document digitizer, and computational linguist.
 Analyze this high-resolution page image carefully and extract all contents into clean, perfectly structured Markdown:
 
 CRITICAL INSTRUCTIONS:
-1. Strict Document Fidelity (Zero Hallucination):
+1. Khmer Language Priority & Focus:
+   - This tool is specifically tailored for Khmer document digitization.
+   - If this page is ENTIRELY in English or a foreign language with ZERO Khmer text (e.g. pure English abstract, English bibliography/references, English copyright page), output EXACTLY:
+     [ទំព័រជាភាសាអង់គ្លេសសុទ្ធ - រំលង (Pure English Page - Skipped)]
+     Do not transcribe English-only pages.
+   - If the page contains Khmer text (or mixed Khmer with English terms, math, STEM formulas, and tables), faithfully extract all Khmer content and STEM formulas with 100% precision.
+
+2. Strict Document Fidelity (Zero Hallucination):
    - Extract ONLY text that is actually present in this page image.
    - NEVER invent, assume, or add institution names, university headers, student names, author lines, or advisor titles if they do not exist on this specific page.
 
-2. Spatial Layout & Reading Order (Top to Bottom):
+3. Spatial Layout & Reading Order (Top to Bottom):
    - HEADER: If the page has a top header, chapter title, or running header, place it at the very top. (If no header exists, do not add one).
    - MAIN BODY: Section headings, body paragraphs, bullet points, data tables, charts, and footnotes belong in the middle body in exact logical reading order.
    - FOOTER: If the page has running footers, author signatures, or page numbers at the bottom, place them at the very BOTTOM (last line) of the output. (If no footer exists, do not add one).
 
-3. Khmer Orthography, Unicode & Precision:
+4. Khmer Orthography, Unicode & Precision:
    - Accurately read all Khmer words with 100% faithful spelling.
    - Fix broken Unicode sequences into standard Khmer Unicode order (Consonant + Subscript ជើង + Dependent Vowel + Diacritics).
    - Restore subscript consonants (ជើង U+17D2, e.g. ្ត, ្ម, ្រ, ្ល, ្ង, ្ធ, ្ញ).
@@ -36,14 +44,14 @@ CRITICAL INSTRUCTIONS:
    - Fix common OCR misrecognitions (e.g. "ជាពិសេស", "ថាមាន", "ជាប់", "ភាពរឹងមាំ").
    - Prevent phantom character insertions inside compound words.
 
-4. Mathematical & STEM Formatting:
+5. Mathematical & STEM Formatting:
    - Convert all mathematical formulas, equations, percentages ($...$), scientific notations, fractions (\frac{a}{b}), roots, matrices, and variables into clean LaTeX ($...$ for inline or $$...$$ for block).
 
-5. Tables & Formatting:
+6. Tables & Formatting:
    - Output tables in clean Markdown format with aligned columns.
    - Preserve bullet points, numbering hierarchy, and bold formatting.
 
-6. Output Format:
+7. Output Format:
    - Output ONLY the clean Markdown content of this page.
    - Do NOT include conversational commentary, notes, or introductions.
 """
@@ -52,25 +60,30 @@ KHMER_TEXT_PROMPT_TEMPLATE = """You are an expert Khmer linguist, academic edito
 Below is raw digital text extracted from Page {page_number} of a PDF document.
 
 CRITICAL INSTRUCTIONS:
-1. Strict Fidelity (Zero Hallucination):
+1. Khmer Language Priority:
+   - If this text is entirely in English/foreign language without any Khmer characters, output EXACTLY:
+     [ទំព័រជាភាសាអង់គ្លេសសុទ្ធ - រំលង (Pure English Page - Skipped)]
+   - Otherwise, restore and fix the Khmer text and LaTeX formulas.
+
+2. Strict Fidelity (Zero Hallucination):
    - Fix and restore ONLY the content provided below.
    - NEVER invent or inject headers, university names, author lines, or titles that are not present in this raw text.
 
-2. Spatial Layout & Structure:
+3. Spatial Layout & Structure:
    - If the text contains top header lines, place them at the top.
    - If the text contains footer lines or page numbers, place them at the very bottom.
    - Keep all headings, paragraphs, bullet lists, and tables in original logical reading order.
 
-3. Khmer Unicode, Orthography & Spelling:
+4. Khmer Unicode, Orthography & Spelling:
    - Fix all scrambled or broken Khmer Unicode sequences (Consonant + ជើង + Vowel + Signs).
    - Fix broken vowels, misplaced vowels (e.g. "នៃ", not "ៃន"), and common OCR/font corruption.
    - Preserve correct spelling of all proper nouns, terms, and names actually in the text.
 
-4. STEM & Tables:
+5. STEM & Tables:
    - Format numbers, formulas, and math into clean LaTeX ($...$ or $$...$$).
    - Format tables cleanly in Markdown syntax.
 
-5. Output Format:
+6. Output Format:
    - Output ONLY the clean, corrected Khmer Markdown text.
    - Do NOT include conversational filler, greetings, or explanations.
 
@@ -200,7 +213,8 @@ class AIService:
                         )
                         if response.text:
                             elapsed = round(time.time() - start_time, 2)
-                            char_count = len(response.text.strip())
+                            raw_resp = response.text.strip()
+                            char_count = len(raw_resp)
                             
                             # Extract exact tokens from Gemini usage metadata
                             tokens_used = 0
@@ -215,22 +229,58 @@ class AIService:
                                 key_pool.mark_success(current_key)
                                 key_pool.record_key_tokens(current_key, tokens_used)
 
-                            log_manager.emit(
-                                level="SUCCESS",
-                                event="API_CALL_SUCCESS",
-                                message=f"Page {page_number} Vision OCR completed with {model_name} [{key_alias}] in {elapsed}s ({char_count} chars, {tokens_used} tokens).",
-                                model=model_name,
-                                page_number=page_number,
-                                details={"latency_seconds": elapsed, "output_chars": char_count, "tokens_used": tokens_used, "key_alias": key_alias}
+                            is_blank = PDFService.is_contentless_or_blank_text(raw_resp)
+                            is_pure_english = (
+                                not is_blank and (
+                                    "[ទំព័រជាភាសាអង់គ្លេសសុទ្ធ - រំលង" in raw_resp
+                                    or "English Page - Skipped" in raw_resp
+                                    or PDFService.is_english_dominant_content(raw_resp)
+                                )
                             )
+
+                            if is_blank:
+                                final_text = ""
+                                used_model = "blank-skipped"
+                                log_manager.emit(
+                                    level="INFO",
+                                    event="PAGE_SKIPPED",
+                                    message=f"⏩ Page {page_number} is blank or contains only an isolated page number. Marked as skipped.",
+                                    model="blank-skipped",
+                                    page_number=page_number,
+                                    details={"latency_seconds": elapsed, "key_alias": key_alias}
+                                )
+                            elif is_pure_english:
+                                final_text = "[ទំព័រជាភាសាអង់គ្លេសសុទ្ធ - រំលង (Pure English Page - Skipped)]"
+                                used_model = "english-skipped"
+                                log_manager.emit(
+                                    level="INFO",
+                                    event="PAGE_SKIPPED",
+                                    message=f"⏩ Page {page_number} is entirely in English with no meaningful Khmer. Marked as skipped.",
+                                    model="english-skipped",
+                                    page_number=page_number,
+                                    details={"latency_seconds": elapsed, "key_alias": key_alias}
+                                )
+                            else:
+                                final_text = raw_resp
+                                used_model = model_name
+                                log_manager.emit(
+                                    level="SUCCESS",
+                                    event="API_CALL_SUCCESS",
+                                    message=f"Page {page_number} Vision OCR completed with {model_name} [{key_alias}] in {elapsed}s ({char_count} chars, {tokens_used} tokens).",
+                                    model=model_name,
+                                    page_number=page_number,
+                                    details={"latency_seconds": elapsed, "output_chars": char_count, "tokens_used": tokens_used, "key_alias": key_alias}
+                                )
 
                             return {
                                 "success": True,
-                                "corrected_text": response.text.strip(),
-                                "model_used": model_name,
+                                "corrected_text": final_text,
+                                "model_used": used_model,
                                 "elapsed_seconds": elapsed,
                                 "tokens_used": tokens_used,
-                                "error": None
+                                "error": None,
+                                "is_blank": is_blank,
+                                "is_english_skipped": is_pure_english
                             }
                     finally:
                         key_pool.release_key(current_key)
@@ -426,7 +476,8 @@ class AIService:
                         )
                         if response.text:
                             elapsed = round(time.time() - start_time, 2)
-                            char_count = len(response.text.strip())
+                            raw_resp = response.text.strip()
+                            char_count = len(raw_resp)
                             
                             # Extract exact tokens from Gemini usage metadata
                             tokens_used = 0
@@ -441,22 +492,58 @@ class AIService:
                                 key_pool.mark_success(current_key)
                                 key_pool.record_key_tokens(current_key, tokens_used)
 
-                            log_manager.emit(
-                                level="SUCCESS",
-                                event="API_CALL_SUCCESS",
-                                message=f"Page {page_number} text correction completed with {model_name} [{key_alias}] in {elapsed}s ({char_count} chars, {tokens_used} tokens).",
-                                model=model_name,
-                                page_number=page_number,
-                                details={"latency_seconds": elapsed, "output_chars": char_count, "tokens_used": tokens_used, "key_alias": key_alias}
+                            is_blank = PDFService.is_contentless_or_blank_text(raw_resp)
+                            is_pure_english = (
+                                not is_blank and (
+                                    "[ទំព័រជាភាសាអង់គ្លេសសុទ្ធ - រំលង" in raw_resp
+                                    or "English Page - Skipped" in raw_resp
+                                    or PDFService.is_english_dominant_content(raw_resp)
+                                )
                             )
+
+                            if is_blank:
+                                final_text = ""
+                                used_model = "blank-skipped"
+                                log_manager.emit(
+                                    level="INFO",
+                                    event="PAGE_SKIPPED",
+                                    message=f"⏩ Page {page_number} is blank or contains only an isolated page number. Marked as skipped.",
+                                    model="blank-skipped",
+                                    page_number=page_number,
+                                    details={"latency_seconds": elapsed, "key_alias": key_alias}
+                                )
+                            elif is_pure_english:
+                                final_text = "[ទំព័រជាភាសាអង់គ្លេសសុទ្ធ - រំលង (Pure English Page - Skipped)]"
+                                used_model = "english-skipped"
+                                log_manager.emit(
+                                    level="INFO",
+                                    event="PAGE_SKIPPED",
+                                    message=f"⏩ Page {page_number} is entirely in English with no meaningful Khmer. Marked as skipped.",
+                                    model="english-skipped",
+                                    page_number=page_number,
+                                    details={"latency_seconds": elapsed, "key_alias": key_alias}
+                                )
+                            else:
+                                final_text = raw_resp
+                                used_model = model_name
+                                log_manager.emit(
+                                    level="SUCCESS",
+                                    event="API_CALL_SUCCESS",
+                                    message=f"Page {page_number} text correction completed with {model_name} [{key_alias}] in {elapsed}s ({char_count} chars, {tokens_used} tokens).",
+                                    model=model_name,
+                                    page_number=page_number,
+                                    details={"latency_seconds": elapsed, "output_chars": char_count, "tokens_used": tokens_used, "key_alias": key_alias}
+                                )
 
                             return {
                                 "success": True,
-                                "corrected_text": response.text.strip(),
-                                "model_used": model_name,
+                                "corrected_text": final_text,
+                                "model_used": used_model,
                                 "elapsed_seconds": elapsed,
                                 "tokens_used": tokens_used,
-                                "error": None
+                                "error": None,
+                                "is_blank": is_blank,
+                                "is_english_skipped": is_pure_english
                             }
                     finally:
                         key_pool.release_key(current_key)

@@ -18,6 +18,7 @@ except ImportError:
 from app.core.config import settings
 from app.services.pdf_service import PDFService
 from app.services.ai_service import AIService
+from app.services.log_service import log_manager
 
 router = APIRouter(tags=["PDF & Image Processing & Streaming"])
 
@@ -216,8 +217,8 @@ async def extract_correct_stream(request: Request):
                                 "error": None,
                                 "already_completed": True
                             }
-                        # Blank Page Fast-Skip: Check if page has no characters / is a blank scan
-                        elif (not raw_txt or len(raw_txt.strip()) == 0) and (img_bytes and PDFService.is_image_bytes_blank(img_bytes)):
+                        # Blank Page Fast-Skip: Check if page has no characters / is a blank scan or only an isolated number
+                        elif (not raw_txt or len(raw_txt.strip()) == 0 or PDFService.is_contentless_or_blank_text(raw_txt)) and (img_bytes and PDFService.is_image_bytes_blank(img_bytes)):
                             res = {
                                 "success": True,
                                 "corrected_text": "",
@@ -227,6 +228,31 @@ async def extract_correct_stream(request: Request):
                                 "error": None,
                                 "is_blank": True
                             }
+                            log_manager.emit(
+                                level="INFO",
+                                event="PAGE_SKIPPED",
+                                message=f"⏩ Page {page_num} is blank or empty scan. Fast-skipping to save API quota.",
+                                model="blank-skipped",
+                                page_number=page_num
+                            )
+                        # Pure English Page Fast-Skip: Check if digital text contains only English and zero Khmer text
+                        elif PDFService.is_pure_english_page(raw_txt, min_chars=35):
+                            res = {
+                                "success": True,
+                                "corrected_text": "[ទំព័រជាភាសាអង់គ្លេសសុទ្ធ - រំលង (Pure English Page - Skipped)]",
+                                "model_used": "english-skipped",
+                                "elapsed_seconds": 0.01,
+                                "tokens_used": 0,
+                                "error": None,
+                                "is_english_skipped": True
+                            }
+                            log_manager.emit(
+                                level="INFO",
+                                event="PAGE_SKIPPED",
+                                message=f"⏩ Page {page_num} contains only English text with no Khmer. Fast-skipping to focus on Khmer and save API quota.",
+                                model="english-skipped",
+                                page_number=page_num
+                            )
                         else:
                             is_ollama_text_only = (provider == "ollama" and model and not any(v in model.lower() for v in ["vision", "vl", "llava", "minicpm", "moondream"]))
 

@@ -48,7 +48,12 @@ export const StatsBar: React.FC<StatsBarProps> = ({
     return pages
       .map((p) => {
         const isBlank = p.model_used === "blank-skipped" || (!p.corrected_text && !p.raw_text);
-        const content = isBlank ? "[ទំព័រទទេ / Blank Page]" : (p.corrected_text || p.raw_text);
+        const isEnglish = p.model_used === "english-skipped" || (p.corrected_text && p.corrected_text.includes("English Page - Skipped"));
+        const content = isBlank
+          ? "[ទំព័រទទេ / Blank Page]"
+          : isEnglish
+          ? "[ទំព័រជាភាសាអង់គ្លេសសុទ្ធ - រំលង (Pure English Page - Skipped)]"
+          : (p.corrected_text || p.raw_text);
         return `=== Page ${p.page_number} ===\n\n${content}\n`;
       })
       .join("\n");
@@ -113,7 +118,12 @@ export const StatsBar: React.FC<StatsBarProps> = ({
     const lines = [`# ${cleanName} - Khmer OCR & AI Restoration`, ""];
     for (const p of pages) {
       const isBlank = p.model_used === "blank-skipped" || (!p.corrected_text && !p.raw_text);
-      const content = isBlank ? "*[ទំព័រទទេ / Blank Page]*" : (p.corrected_text || p.raw_text);
+      const isEnglish = p.model_used === "english-skipped" || (p.corrected_text && p.corrected_text.includes("English Page - Skipped"));
+      const content = isBlank
+        ? "*[ទំព័រទទេ / Blank Page]*"
+        : isEnglish
+        ? "*[ទំព័រជាភាសាអង់គ្លេសសុទ្ធ - រំលង (Pure English Page - Skipped)]*"
+        : (p.corrected_text || p.raw_text);
       lines.push(`## Page ${p.page_number}\n\n${content}\n`);
     }
     await saveFileWithPicker(lines.join("\n"), cleanName, "text/markdown", "md", "Markdown Document (.md)");

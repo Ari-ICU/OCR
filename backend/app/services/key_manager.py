@@ -153,19 +153,24 @@ class APIKeyPool:
             self._cleanup_stale_leases()
             while True:
                 now = time.time()
-                # 1. First priority: healthy keys that are NOT currently in-flight by another thread
-                idle_healthy_keys = [
-                    k for k in keys 
-                    if k not in exclude_set 
-                    and k not in self._active_leases
-                    and self._key_cooldowns.get(k, 0) <= now 
-                    and self._key_daily_exhausted.get(k, 0) <= now
-                ]
+                total_keys = len(keys)
 
-                if idle_healthy_keys:
-                    # Pick using round-robin among idle healthy keys
-                    selected_key = idle_healthy_keys[self._round_robin_idx % len(idle_healthy_keys)]
-                    self._round_robin_idx = (self._round_robin_idx + 1) % max(1, len(keys))
+                # 1. True sequential round-robin search starting from self._round_robin_idx
+                selected_key = None
+                for offset in range(total_keys):
+                    idx = (self._round_robin_idx + offset) % total_keys
+                    k = keys[idx]
+                    if (
+                        k not in exclude_set
+                        and k not in self._active_leases
+                        and self._key_cooldowns.get(k, 0) <= now
+                        and self._key_daily_exhausted.get(k, 0) <= now
+                    ):
+                        selected_key = k
+                        self._round_robin_idx = (idx + 1) % total_keys
+                        break
+
+                if selected_key:
                     self._active_leases.add(selected_key)
                     self._lease_timestamps[selected_key] = time.time()
                     self._key_usage_count[selected_key] = self._key_usage_count.get(selected_key, 0) + 1
@@ -198,6 +203,8 @@ class APIKeyPool:
                 # Sort by cooldown expiry, prioritizing non-busy keys
                 sorted_keys = sorted(available, key=lambda k: (1 if k in self._active_leases else 0, self._key_cooldowns.get(k, 0)))
                 selected_key = sorted_keys[0]
+                if selected_key in keys:
+                    self._round_robin_idx = (keys.index(selected_key) + 1) % total_keys
                 self._active_leases.add(selected_key)
                 self._lease_timestamps[selected_key] = time.time()
                 self._key_usage_count[selected_key] = self._key_usage_count.get(selected_key, 0) + 1

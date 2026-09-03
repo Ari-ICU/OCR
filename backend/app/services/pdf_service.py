@@ -75,19 +75,99 @@ class PDFService:
             return ""
 
     @staticmethod
-    def is_image_bytes_blank(image_bytes: bytes, threshold_stddev: float = 4.5) -> bool:
+    def is_image_bytes_blank(image_bytes: bytes, threshold_stddev: float = 5.0) -> bool:
         """
-        Detects whether an image is blank/solid background (e.g. flyleaf, empty scan)
+        Detects whether an image is blank/solid background or has only a tiny page number at the bottom (e.g. '- ២៦ -')
         to skip unnecessary AI OCR and preserve API quota.
         """
         try:
             from PIL import Image, ImageStat
             img = Image.open(io.BytesIO(image_bytes)).convert("L")
+            img.thumbnail((300, 400))
+            
             stat = ImageStat.Stat(img)
             stddev = stat.stddev[0]
-            return stddev < threshold_stddev
+            if stddev < 3.0:
+                return True
+                
+            # Count dark ink pixels (< 200 brightness out of 255)
+            pixels = list(img.getdata())
+            dark_pixels = sum(1 for p in pixels if p < 200)
+            total_pixels = len(pixels)
+            dark_ratio = dark_pixels / max(1, total_pixels)
+            
+            # If dark ink is less than 0.12% of the whole page, it's just a tiny isolated page number or empty scan
+            if dark_ratio < 0.0012:
+                return True
+                
+            return False
         except Exception:
             return False
+
+    @staticmethod
+    def is_contentless_or_blank_text(text: str) -> bool:
+        """
+        Detects if text has no meaningful body content (e.g., empty, or only isolated page numbers/dashes like '- ២៦ -', '41', '- ៤០ -').
+        """
+        if not text:
+            return True
+        cleaned = text.strip()
+        if len(cleaned) == 0:
+            return True
+        
+        # If total length is under 30 chars and contains only digits, dashes, brackets, symbols
+        if len(cleaned) < 30:
+            # Strip all symbols, whitespace, digits (Khmer & Latin)
+            stripped_letters = re.sub(r"[\s\-_–—*#\d\u17E0-\u17E9\(\)\[\]\.\,\/\\|~+=:;]", "", cleaned)
+            if len(stripped_letters) <= 2:
+                return True
+                
+        return False
+
+    @staticmethod
+    def has_khmer_text(text: str) -> bool:
+        """Checks if the text contains any Khmer Unicode characters (U+1780 to U+17FF or U+19E0 to U+19FF)."""
+        if not text:
+            return False
+        return bool(re.search(r"[\u1780-\u17FF\u19E0-\u19FF]", text))
+
+    @staticmethod
+    def is_english_dominant_content(text: str) -> bool:
+        """
+        Returns True if the content is predominantly English with no meaningful Khmer body text
+        (e.g., ASEAN Charter in English, English research papers, English bibliography/references,
+        even if there are isolated Khmer numbers in the footer like '- ៤០ -').
+        """
+        if not text or len(text.strip()) == 0:
+            return False
+        
+        # Count actual Khmer alphabet letters (consonants and vowels, excluding just digits)
+        khmer_letters = len(re.findall(r"[\u1780-\u17D3]", text))
+        latin_letters = len(re.findall(r"[a-zA-Z]", text))
+        
+        # If there are NO Khmer alphabet letters at all, and Latin text > 30 chars
+        if khmer_letters == 0 and latin_letters > 30:
+            return True
+        
+        # If Latin text dominates (>40 chars) and Khmer letters are minimal (< 8 chars, e.g. page numbers/header)
+        if latin_letters > 40 and khmer_letters < 8:
+            return True
+        
+        # If text is more than 85% Latin letters
+        if latin_letters > 80 and (khmer_letters / max(1, latin_letters + khmer_letters)) < 0.12:
+            return True
+            
+        return False
+
+    @staticmethod
+    def is_pure_english_page(text: str, min_chars: int = 35) -> bool:
+        """
+        Detects if digital text contains substantial text (>= min_chars) but zero Khmer characters
+        (e.g., English abstract, English bibliography/references, English licensing page).
+        """
+        if not text or len(text.strip()) < min_chars:
+            return False
+        return PDFService.is_english_dominant_content(text)
 
     @staticmethod
     def is_page_blank(page: fitz.Page, threshold_stddev: float = 4.5) -> bool:

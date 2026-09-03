@@ -40,6 +40,8 @@ export interface PageResult {
   char_count?: number;
   has_formulas?: boolean;
   thumbnail?: string;
+  is_blank?: boolean;
+  is_english_skipped?: boolean;
 }
 
 interface PageCardProps {
@@ -118,24 +120,25 @@ export const PageCard: React.FC<PageCardProps> = ({
                 <RefreshCw className="h-3 w-3 animate-spin" />
                 <span>AI Vision Restoring...</span>
               </span>
-            ) : page.corrected_text ? (
-              page.success ? (
-                page.model_used === "blank-skipped" || (!page.corrected_text && !page.raw_text) ? (
-                  <span className="flex items-center space-x-1 text-[11px] text-slate-300 bg-slate-800/90 border border-slate-700 px-2.5 py-0.5 rounded-full font-medium" title="Blank / empty page detected. Skipped AI OCR to save API quota.">
-                    <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
-                    <span>Blank Page (Skipped)</span>
-                  </span>
-                ) : (
-                  <span className="flex items-center space-x-1 text-[11px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-medium">
-                    <Check className="h-3 w-3 text-emerald-400" />
-                    <span>Restored</span>
-                  </span>
-                )
-              ) : (
-                <span className="text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/30 px-2.5 py-0.5 rounded-full font-medium">
-                  Failed (Raw Mode)
-                </span>
-              )
+            ) : page.model_used === "blank-skipped" || page.is_blank ? (
+              <span className="flex items-center space-x-1 text-[11px] text-slate-300 bg-slate-800/90 border border-slate-700 px-2.5 py-0.5 rounded-full font-medium" title="Blank / empty page detected. Skipped AI OCR to save API quota.">
+                <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+                <span>Blank Page (Skipped)</span>
+              </span>
+            ) : page.model_used === "english-skipped" || page.is_english_skipped || (page.corrected_text && page.corrected_text.includes("English Page - Skipped")) ? (
+              <span className="flex items-center space-x-1 text-[11px] text-sky-300 bg-sky-500/10 border border-sky-500/30 px-2.5 py-0.5 rounded-full font-medium" title="Pure English page without Khmer detected. Skipped to focus strictly on Khmer content.">
+                <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+                <span>English Page (Skipped)</span>
+              </span>
+            ) : page.success || (page.corrected_text && page.corrected_text.trim().length > 0) ? (
+              <span className="flex items-center space-x-1 text-[11px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-medium">
+                <Check className="h-3 w-3 text-emerald-400" />
+                <span>Restored</span>
+              </span>
+            ) : page.error ? (
+              <span className="text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/30 px-2.5 py-0.5 rounded-full font-medium">
+                Failed (Raw Mode)
+              </span>
             ) : (
               <span className="flex items-center space-x-1 text-[11px] text-slate-400 bg-slate-800/80 border border-slate-700 px-2.5 py-0.5 rounded-full font-medium">
                 <Clock className="h-3 w-3 text-slate-500" />
