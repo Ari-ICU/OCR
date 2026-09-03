@@ -148,7 +148,7 @@ def process_page_vision_gemini(
     client: genai.Client,
     image_bytes: bytes,
     page_number: int,
-    models: list = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
+    models: list = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"]
 ) -> str:
     """Sends rendered page image to Gemini Vision API."""
     for model_name in models:
@@ -180,7 +180,7 @@ def process_page_text_gemini(
     client: genai.Client,
     page_text: str,
     page_number: int,
-    models: list = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
+    models: list = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"]
 ) -> str:
     """Sends raw page text to Gemini to fix Khmer Unicode order, spelling, and formulas."""
     prompt = KHMER_TEXT_PROMPT_TEMPLATE.format(page_number=page_number, page_text=page_text)
