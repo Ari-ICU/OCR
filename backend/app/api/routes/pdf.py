@@ -109,9 +109,9 @@ async def extract_correct_stream(request: Request):
     ollama_url = fields.get("ollama_url") or settings.DEFAULT_OLLAMA_URL
     
     try:
-        dpi = int(fields.get("dpi", 150))
+        dpi = int(fields.get("dpi", 200))
     except (ValueError, TypeError):
-        dpi = 150
+        dpi = 200
 
     try:
         start_page = int(fields.get("start_page", 1))

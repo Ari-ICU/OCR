@@ -58,8 +58,8 @@ class PDFService:
         return PDFService.create_document_from_files_data([(filename or "document.pdf", file_bytes)])
 
     @staticmethod
-    def render_page_image_bytes(page: fitz.Page, dpi: int = 150) -> bytes:
-        """Renders a PDF or image page to high-res PNG image bytes using PyMuPDF."""
+    def render_page_image_bytes(page: fitz.Page, dpi: int = 200) -> bytes:
+        """Renders a PDF or image page to high-res PNG image bytes using PyMuPDF (200 DPI for sharp Khmer OCR)."""
         pix = page.get_pixmap(dpi=dpi)
         return pix.tobytes("png")
 
