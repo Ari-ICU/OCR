@@ -187,7 +187,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* Primary Engine: Vision OCR (VLM) */}
             <button
               type="button"
-              disabled={isProcessing}
               onClick={() => {
                 setActiveTab("vision");
                 if (setProcessingMode) setProcessingMode("vision");
@@ -197,7 +196,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 activeTab === "vision"
                   ? "bg-indigo-600 text-white shadow-md font-bold"
                   : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
-              } disabled:opacity-50`}
+              }`}
             >
               <Eye className={`h-3.5 w-3.5 ${activeTab === "vision" ? "text-white" : "text-indigo-400"}`} />
               <span className="hidden sm:inline">Vision OCR</span>
