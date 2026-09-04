@@ -333,6 +333,16 @@ export default function Home() {
   // When files are selected (single PDF or multiple images), fetch preview and persist session
   const handleFilesSelected = async (files: File[]) => {
     if (!files || files.length === 0) return;
+
+    // Immediately stop and abort any ongoing OCR processing
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    fetch(`${API_BASE_URL}/api/cancel-all-processing`, { method: "POST" }).catch(() => {});
+    setIsProcessing(false);
+    setActiveWorkerPages([]);
+
     setSelectedFiles(files);
     setSelectedFile(files[0]);
     setPages([]);
@@ -377,6 +387,14 @@ export default function Home() {
   };
 
   const handleClearExtractedPages = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    fetch(`${API_BASE_URL}/api/cancel-all-processing`, { method: "POST" }).catch(() => {});
+    setIsProcessing(false);
+    setActiveWorkerPages([]);
+
     setPages([]);
     setTotalPages(0);
     setStartPage(1);
@@ -394,6 +412,14 @@ export default function Home() {
   };
 
   const handleClearAllSession = async () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    fetch(`${API_BASE_URL}/api/cancel-all-processing`, { method: "POST" }).catch(() => {});
+    setIsProcessing(false);
+    setActiveWorkerPages([]);
+
     setSelectedFile(null);
     setSelectedFiles([]);
     setPages([]);
@@ -674,6 +700,7 @@ export default function Home() {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    fetch(`${API_BASE_URL}/api/cancel-all-processing`, { method: "POST" }).catch(() => {});
     setIsProcessing(false);
     setActiveWorkerPages([]);
   };

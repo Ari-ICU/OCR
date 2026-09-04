@@ -31,6 +31,26 @@ router = APIRouter(tags=["PDF & Image Processing & Streaming"])
 
 SUPPORTED_EXTENSIONS = (".pdf", ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tif")
 
+# Global set of in-flight page processing tasks across all sessions
+ACTIVE_PROCESSING_TASKS: set[asyncio.Task] = set()
+
+@router.post("/cancel-all-processing")
+async def cancel_all_processing_endpoint():
+    """Cancels all currently running background OCR and PDF processing tasks immediately."""
+    cancelled_count = 0
+    for task in list(ACTIVE_PROCESSING_TASKS):
+        if not task.done():
+            task.cancel()
+            cancelled_count += 1
+    ACTIVE_PROCESSING_TASKS.clear()
+    log_manager.emit(
+        level="WARN",
+        event="PROCESSING_CANCELLED",
+        message=f"🛑 User changed file or clicked cancel. Stopped {cancelled_count} active page workers.",
+        model="system"
+    )
+    return {"status": "cancelled", "tasks_cancelled": cancelled_count}
+
 async def parse_request_files(request: Request) -> Tuple[List[Tuple[str, bytes]], Dict[str, Any]]:
     """Robustly extracts all uploaded files and form fields with security validations."""
     form = await request.form()
@@ -227,6 +247,10 @@ async def extract_correct_stream(request: Request):
                 
                 try:
                     async with semaphore:
+                        # Abort immediately if client disconnected
+                        if await request.is_disconnected():
+                            return
+
                         # Notify page start
                         await event_queue.put(
                             f"event: page_start\ndata: {json.dumps({'page_number': page_num, 'raw_text': raw_txt})}\n\n"
@@ -318,12 +342,19 @@ async def extract_correct_stream(request: Request):
                                         ollama_url=ollama_url or settings.DEFAULT_OLLAMA_URL
                                     )
 
-                    all_corrected_dict[page_num] = res.get("corrected_text", "")
-                    
-                    # Notify page complete
-                    await event_queue.put(
-                        f"event: page_done\ndata: {json.dumps({'page_number': page_num, 'raw_text': raw_txt, 'corrected_text': res.get('corrected_text', ''), 'model_used': res.get('model_used', 'unknown'), 'elapsed_seconds': res.get('elapsed_seconds', 0.0), 'tokens_used': res.get('tokens_used', 0), 'success': res.get('success', False), 'error': res.get('error'), 'already_completed': res.get('already_completed', False), 'is_blank': res.get('is_blank', False)})}\n\n"
-                    )
+                        # Check again after API call before putting to queue
+                        if await request.is_disconnected():
+                            return
+
+                        all_corrected_dict[page_num] = res.get("corrected_text", "")
+                        
+                        # Notify page complete
+                        await event_queue.put(
+                            f"event: page_done\ndata: {json.dumps({'page_number': page_num, 'raw_text': raw_txt, 'corrected_text': res.get('corrected_text', ''), 'model_used': res.get('model_used', 'unknown'), 'elapsed_seconds': res.get('elapsed_seconds', 0.0), 'tokens_used': res.get('tokens_used', 0), 'success': res.get('success', False), 'error': res.get('error'), 'already_completed': res.get('already_completed', False), 'is_blank': res.get('is_blank', False)})}\n\n"
+                        )
+                except asyncio.CancelledError:
+                    # Clean cancellation, do not emit further events or errors
+                    return
                 except Exception as ex:
                     logger.exception(f"Error processing page {page_num}: {ex}")
                     all_corrected_dict[page_num] = raw_txt or ""
@@ -331,42 +362,56 @@ async def extract_correct_stream(request: Request):
                         f"event: page_done\ndata: {json.dumps({'page_number': page_num, 'raw_text': raw_txt, 'corrected_text': raw_txt or '', 'model_used': 'error-fallback', 'elapsed_seconds': 0.0, 'tokens_used': 0, 'success': False, 'error': str(ex)})}\n\n"
                     )
 
-            # Launch all page worker tasks
-            for item in pages_bundle:
-                task = asyncio.create_task(process_single_page(item))
-                active_tasks.append(task)
+            try:
+                # Launch all page worker tasks and register globally
+                for item in pages_bundle:
+                    task = asyncio.create_task(process_single_page(item))
+                    active_tasks.append(task)
+                    ACTIVE_PROCESSING_TASKS.add(task)
+                    task.add_done_callback(ACTIVE_PROCESSING_TASKS.discard)
 
-            # Stream events as workers finish
-            completed_count = 0
-            while completed_count < selected_pages_count:
-                if await request.is_disconnected():
-                    for t in active_tasks:
-                        t.cancel()
-                    break
-
-                try:
-                    event_item = await asyncio.wait_for(event_queue.get(), timeout=2.0)
-                    yield event_item
-                    if "event: page_done" in event_item:
-                        completed_count += 1
-                except asyncio.TimeoutError:
+                # Stream events as workers finish
+                completed_count = 0
+                while completed_count < selected_pages_count:
                     if await request.is_disconnected():
                         for t in active_tasks:
-                            t.cancel()
+                            if not t.done():
+                                t.cancel()
                         break
 
-            # Wait for all background tasks to cleanly resolve
-            await asyncio.gather(*active_tasks, return_exceptions=True)
+                    try:
+                        event_item = await asyncio.wait_for(event_queue.get(), timeout=1.0)
+                        yield event_item
+                        if "event: page_done" in event_item:
+                            completed_count += 1
+                    except asyncio.TimeoutError:
+                        if await request.is_disconnected():
+                            for t in active_tasks:
+                                if not t.done():
+                                    t.cancel()
+                            break
 
-            # Build full concatenated text in correct sequential order
-            ordered_blocks = [
-                f"=== ទំព័រទី {p['page_number']} (Page {p['page_number']}) ===\n\n{all_corrected_dict.get(p['page_number'], '')}\n"
-                for p in pages_overview
-            ]
-            full_text = "\n".join(ordered_blocks)
+                # Wait for all background tasks to cleanly resolve
+                await asyncio.gather(*active_tasks, return_exceptions=True)
 
-            yield f"event: done\ndata: {json.dumps({'total_pages': selected_pages_count, 'full_text': full_text})}\n\n"
+                # Build full concatenated text in correct sequential order
+                ordered_blocks = [
+                    f"=== ទំព័រទី {p['page_number']} (Page {p['page_number']}) ===\n\n{all_corrected_dict.get(p['page_number'], '')}\n"
+                    for p in pages_overview
+                ]
+                full_text = "\n".join(ordered_blocks)
+
+                yield f"event: done\ndata: {json.dumps({'total_pages': selected_pages_count, 'full_text': full_text})}\n\n"
+
+            finally:
+                # CRITICAL: If client disconnects or aborts, cancel all remaining tasks immediately
+                for t in active_tasks:
+                    if not t.done():
+                        t.cancel()
+                    ACTIVE_PROCESSING_TASKS.discard(t)
             
+        except asyncio.CancelledError:
+            return
         except Exception as e:
             yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
 
