@@ -8,6 +8,9 @@ echo "=========================================="
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
 
+# 0. Ensure directories exist
+mkdir -p logs scratch
+
 # 1. Check Python & Virtual Environment
 echo "📦 Setting up Python Virtual Environment..."
 if [ ! -d ".venv" ]; then

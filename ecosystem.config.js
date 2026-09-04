@@ -8,6 +8,10 @@ module.exports = {
       interpreter: "none",
       autorestart: true,
       max_memory_restart: "1G",
+      time: true,
+      error_file: "../logs/backend-error.log",
+      out_file: "../logs/backend-out.log",
+      merge_logs: true,
       env: {
         NODE_ENV: "production",
         PORT: 8000
@@ -16,10 +20,14 @@ module.exports = {
     {
       name: "khmer-ocr-frontend",
       cwd: "./frontend",
-      script: "node_modules/next/dist/bin/next",
+      script: "node_modules/.bin/next",
       args: "start -p 3000 -H 127.0.0.1",
       autorestart: true,
       max_memory_restart: "1G",
+      time: true,
+      error_file: "../logs/frontend-error.log",
+      out_file: "../logs/frontend-out.log",
+      merge_logs: true,
       env: {
         NODE_ENV: "production",
         PORT: 3000
