@@ -14,7 +14,6 @@ import {
   RotateCcw,
   ArrowRight,
   Link as LinkIcon,
-  Globe,
   Download,
   Loader2
 } from "lucide-react";
@@ -30,8 +29,8 @@ interface FileUploadProps {
   onStartProcessing: () => void;
   concurrency: number;
   setConcurrency: (val: number) => void;
-  processingMode: "vision" | "text";
-  setProcessingMode: (mode: "vision" | "text") => void;
+  processingMode?: "vision";
+  setProcessingMode?: (mode: "vision") => void;
   startPage: number;
   setStartPage: (page: number) => void;
   endPage: number | null;
@@ -53,7 +52,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
   onStartProcessing,
   concurrency,
   setConcurrency,
-  processingMode,
+  processingMode = "vision",
   setProcessingMode,
   startPage,
   setStartPage,
@@ -226,9 +225,9 @@ export const FileUpload: React.FC<FileUploadProps> = ({
       }
 
       const isWebpage = (res.headers.get("x-is-webpage") || "").toLowerCase() === "true";
-      if (isWebpage && processingMode === "vision") {
+      if (isWebpage) {
         throw new Error(
-          "តំណភ្ជាប់ Webpage HTML គាំទ្រតែនៅក្នុង Digital Text (#text) ប៉ុណ្ណោះ។ សូមចុចលើ Digital Text ដើម្បី Crawl អត្ថបទនេះ។ (Webpage HTML articles are only supported in #text)"
+          "តំណភ្ជាប់នេះជាទំព័រ Webpage HTML (មិនមែនជាឯកសារ PDF ឬរូបភាពទេ)។ សូមបញ្ចូលតំណភ្ជាប់ឯកសារ PDF ឬរូបភាព។ (This link is a webpage HTML, not a PDF or image file. Please provide a direct PDF or image URL.)"
         );
       }
 
@@ -293,40 +292,38 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     <div className="w-full space-y-4">
       {activeFileList.length === 0 ? (
         <div className="space-y-3">
-          {/* Toggle between Local Upload & Link Import (Only shown in Vision OCR mode) */}
-          {processingMode !== "text" && (
-            <div className="flex items-center justify-center">
-              <div className="inline-flex p-1 rounded-2xl bg-[#0D1322] border border-slate-800 shadow-lg">
-                <button
-                  type="button"
-                  onClick={() => { setActiveTab("file"); setError(null); }}
-                  className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
-                    activeTab === "file"
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  <FileUp className="h-4 w-4" />
-                  <span>Local Files (PDF / Images)</span>
-                </button>
+          {/* Toggle between Local Upload & Link Import */}
+          <div className="flex items-center justify-center">
+            <div className="inline-flex p-1 rounded-2xl bg-[#0D1322] border border-slate-800 shadow-lg">
+              <button
+                type="button"
+                onClick={() => { setActiveTab("file"); setError(null); }}
+                className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  activeTab === "file"
+                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <FileUp className="h-4 w-4" />
+                <span>Local Files (PDF / Images)</span>
+              </button>
 
-                <button
-                  type="button"
-                  onClick={() => { setActiveTab("url"); setError(null); }}
-                  className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
-                    activeTab === "url"
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  <LinkIcon className="h-4 w-4" />
-                  <span>Import via Link / URL</span>
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => { setActiveTab("url"); setError(null); }}
+                className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  activeTab === "url"
+                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                <LinkIcon className="h-4 w-4" />
+                <span>Import via Link / URL</span>
+              </button>
             </div>
-          )}
+          </div>
 
-          {processingMode !== "text" && activeTab === "file" ? (
+          {activeTab === "file" ? (
             <div
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
@@ -371,17 +368,13 @@ export const FileUpload: React.FC<FileUploadProps> = ({
             <div className="border border-slate-800 rounded-3xl p-6 sm:p-8 bg-[#0D1322] shadow-2xl space-y-5">
               <div className="text-center space-y-1.5">
                 <div className="h-12 w-12 mx-auto rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
-                  <Globe className="h-6 w-6" />
+                  <LinkIcon className="h-6 w-6" />
                 </div>
                 <h3 className="text-sm sm:text-base font-bold text-white">
-                  {processingMode === "text"
-                    ? "Crawl & Extract Khmer Webpage HTML Articles"
-                    : "Import PDF or Image from Link"}
+                  Import PDF or Image from Link
                 </h3>
                 <p className="text-xs text-slate-400 max-w-lg mx-auto font-khmer">
-                  {processingMode === "text"
-                    ? "បិទភ្ជាប់តំណភ្ជាប់ Webpage (Fresh News, Kampuchea Thmey, Sabay ឬគេហទំព័រព័ត៌មាន) ដើម្បីស្រង់យកកថាខណ្ឌអត្ថបទយូនីកូដខ្មែរស្អាត ១០០% ដោយជម្រុះផ្ទាំង Ads និង Menu"
-                    : "បញ្ចូលតំណភ្ជាប់ (Google Drive, Dropbox ឬ Direct Link) នៃឯកសារ PDF ឬរូបភាពដើម្បីទាញយកដោយស្វ័យប្រវត្តិ"}
+                  បញ្ចូលតំណភ្ជាប់ (Google Drive, Dropbox ឬ Direct Link) នៃឯកសារ PDF ឬរូបភាពដើម្បីទាញយកដោយស្វ័យប្រវត្តិ
                 </p>
               </div>
 
@@ -394,11 +387,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                     type="url"
                     value={urlInput}
                     onChange={(e) => setUrlInput(e.target.value)}
-                    placeholder={
-                      processingMode === "text"
-                        ? "https://www.kampucheathmey.com/... or https://freshnewsasia.com/..."
-                        : "https://drive.google.com/... or https://example.com/document.pdf"
-                    }
+                    placeholder="https://drive.google.com/... or https://example.com/document.pdf"
                     disabled={isFetchingUrl}
                     className="w-full bg-[#070A12] border border-slate-700 rounded-2xl pl-11 pr-32 py-3 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-inner"
                   />
@@ -410,78 +399,41 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                     {isFetchingUrl ? (
                       <>
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        <span>Crawling...</span>
+                        <span>Downloading...</span>
                       </>
                     ) : (
                       <>
                         <Download className="h-3.5 w-3.5" />
-                        <span>{processingMode === "text" ? "Crawl & Import" : "Fetch & Import"}</span>
+                        <span>Fetch & Import</span>
                       </>
                     )}
                   </button>
                 </div>
 
                 <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] text-slate-500 pt-1">
-                  {processingMode === "text" ? (
-                    <>
-                      <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-cyan-400 font-medium">
-                        📰 Khmer News & Media
-                      </span>
-                      <span>•</span>
-                      <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-indigo-300 font-medium">
-                        🏛️ Government Web Announcements
-                      </span>
-                      <span>•</span>
-                      <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">
-                        🌐 HTML Blog & Articles
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">
-                        📄 Direct PDF URL
-                      </span>
-                      <span>•</span>
-                      <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">
-                        🖼️ Image Link (PNG, JPG)
-                      </span>
-                      <span>•</span>
-                      <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">
-                        📁 Google Drive / Dropbox
-                      </span>
-                    </>
-                  )}
+                  <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">
+                    📄 Direct PDF URL
+                  </span>
+                  <span>•</span>
+                  <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">
+                    🖼️ Image Link (PNG, JPG)
+                  </span>
+                  <span>•</span>
+                  <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">
+                    📁 Google Drive / Dropbox
+                  </span>
                 </div>
 
                 {/* Quick 1-Click Samples for Testing */}
                 <div className="flex flex-wrap items-center justify-center gap-2 pt-1 text-xs">
                   <span className="text-[11px] text-slate-500 font-medium">Quick Test:</span>
-                  {processingMode === "text" ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setUrlInput("https://www.kampucheathmey.com/sports/1178993")}
-                        className="px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 text-[11px] transition-colors"
-                      >
-                        📰 Kampuchea Thmey Sports
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setUrlInput("https://www.kampucheathmey.com/politics/1175952")}
-                        className="px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 text-[11px] transition-colors"
-                      >
-                        📰 Kampuchea Thmey Politics
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setUrlInput("https://mosvy.gov.kh/wp-content/uploads/2021/11/02-Prakas-on-CTP-PF-Implementation.pdf")}
-                      className="px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 text-[11px] transition-colors"
-                    >
-                      📜 MoSVY PDF Prakas
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => setUrlInput("https://mosvy.gov.kh/wp-content/uploads/2021/11/02-Prakas-on-CTP-PF-Implementation.pdf")}
+                    className="px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 text-[11px] transition-colors"
+                  >
+                    📜 MoSVY PDF Prakas
+                  </button>
                 </div>
               </form>
             </div>
@@ -499,15 +451,9 @@ export const FileUpload: React.FC<FileUploadProps> = ({
           {/* File Information Row */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
             <div className="flex items-center space-x-3.5">
-              {processingMode === "text" ? (
-                <div className="h-11 w-11 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 shrink-0 shadow-md">
-                  <Globe className="h-5 w-5 text-cyan-400" />
-                </div>
-              ) : (
-                <div className="h-11 w-11 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0 shadow-md">
-                  {isImageFile ? <ImageIcon className="h-5 w-5 text-indigo-400" /> : <FileText className="h-5 w-5" />}
-                </div>
-              )}
+              <div className="h-11 w-11 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0 shadow-md">
+                {isImageFile ? <ImageIcon className="h-5 w-5 text-indigo-400" /> : <FileText className="h-5 w-5" />}
+              </div>
               <div className="overflow-hidden">
                 <h4 className="text-sm font-semibold text-white truncate max-w-xs sm:max-w-md">
                   {isMultiple
@@ -518,9 +464,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                   <span>{formatFileSize(totalFileSize)}</span>
                   <span>•</span>
                   <span>
-                    {processingMode === "text"
-                      ? `${totalPdfPages > 0 ? `${totalPdfPages} Webpage Sections / Pages` : "Webpage Article Loaded"}`
-                      : isMultiple
+                    {isMultiple
                       ? `${activeFileList.length} Pages (Multi-Image)`
                       : isImageFile
                       ? "Single Page Image"
@@ -569,23 +513,21 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                       if (onClearFile) onClearFile();
                       setActiveTab("url");
                     }}
-                    className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs ${processingMode === "text" ? "text-cyan-300 hover:text-white bg-cyan-950/40 hover:bg-cyan-900/60 border border-cyan-500/30" : "text-indigo-300 hover:text-white bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-500/30"} transition-colors`}
-                    title={processingMode === "text" ? "Crawl another Webpage" : "Import different file from Link / URL"}
+                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs text-indigo-300 hover:text-white bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-500/30 transition-colors"
+                    title="Import different file from Link / URL"
                   >
                     <LinkIcon className="h-3.5 w-3.5" />
-                    <span>{processingMode === "text" ? "New Webpage Link" : "Import Link"}</span>
+                    <span>Import Link</span>
                   </button>
-                  {processingMode !== "text" && (
-                    <button
-                      type="button"
-                      onClick={onClearFile}
-                      className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-800 border border-slate-700 transition-colors"
-                      title="Choose different file"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                      <span>Change File</span>
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={onClearFile}
+                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-800 border border-slate-700 transition-colors"
+                    title="Choose different file"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    <span>Change File</span>
+                  </button>
                 </div>
               )}
             </div>
@@ -716,8 +658,6 @@ export const FileUpload: React.FC<FileUploadProps> = ({
               <span>
                 {isProcessing
                   ? "Processing Live Batch..."
-                  : processingMode === "text"
-                  ? `Process Webpage Article (Sections ${startPage} - ${endPage || totalPdfPages || startPage})`
                   : existingPagesCount > 0
                   ? `Extract & Append (Pages ${startPage} - ${endPage || totalPdfPages || startPage})`
                   : `Start Vision OCR (Pages ${startPage} - ${endPage || totalPdfPages || startPage})`}

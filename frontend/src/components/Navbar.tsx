@@ -12,9 +12,6 @@ import {
   FileText,
   Terminal,
   Eye,
-  Link as LinkIcon,
-  Globe,
-  MoreHorizontal
 } from "lucide-react";
 import { API_BASE_URL } from "../config/api";
 
@@ -25,7 +22,7 @@ export interface ModelInfo {
   description: string;
 }
 
-export type NavTab = "vision" | "text" | "download" | "monitor" | "keys";
+export type NavTab = "vision" | "monitor" | "keys";
 
 interface NavbarProps {
   apiKey: string;
@@ -42,8 +39,8 @@ interface NavbarProps {
   activeTab: NavTab;
   setActiveTab: (tab: NavTab) => void;
   rateLimitHits?: number;
-  processingMode?: "vision" | "text";
-  setProcessingMode?: (mode: "vision" | "text") => void;
+  processingMode?: "vision";
+  setProcessingMode?: (mode: "vision") => void;
   isProcessing?: boolean;
 }
 
@@ -68,14 +65,12 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
-  const [showToolsDropdown, setShowToolsDropdown] = useState(false);
   const [tempKey, setTempKey] = useState(apiKey);
   const [tempHfKey, setTempHfKey] = useState(hfKey);
   const [tempOllamaUrl, setTempOllamaUrl] = useState(ollamaUrl);
   const [backendModels, setBackendModels] = useState<ModelInfo[]>([]);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const toolsDropdownRef = useRef<HTMLDivElement>(null);
 
   // Fetch models directly from backend on mount and whenever health changes
   useEffect(() => {
@@ -130,24 +125,20 @@ export const Navbar: React.FC<NavbarProps> = ({
       .filter((k) => k.length > 5).length;
   }, [tempKey]);
 
-  // Close dropdowns when clicking outside
+  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setShowModelDropdown(false);
       }
-      if (toolsDropdownRef.current && !toolsDropdownRef.current.contains(e.target as Node)) {
-        setShowToolsDropdown(false);
-      }
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setShowModelDropdown(false);
-        setShowToolsDropdown(false);
       }
     };
 
-    if (showModelDropdown || showToolsDropdown) {
+    if (showModelDropdown) {
       document.addEventListener("mousedown", handleClickOutside);
       document.addEventListener("keydown", handleKeyDown);
     }
@@ -155,7 +146,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [showModelDropdown, showToolsDropdown]);
+  }, [showModelDropdown]);
 
   const handleSaveSettings = () => {
     setApiKey(tempKey);
@@ -171,7 +162,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Logo & Brand Identity */}
           <div className="flex items-center space-x-3 shrink-0">
-            <div className="relative group cursor-pointer" onClick={() => setActiveTab(processingMode === "text" ? "text" : "vision")}>
+            <div className="relative group cursor-pointer" onClick={() => setActiveTab("vision")}>
               <div className="p-2 bg-slate-900 hover:bg-slate-850 border border-slate-700/80 rounded-xl flex items-center justify-center shadow-inner transition">
                 <Sparkles className="h-5 w-5 text-indigo-400 group-hover:rotate-12 transition-transform duration-300" />
               </div>
@@ -191,9 +182,9 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
 
-          {/* Responsive Navigation Tabs with Primary Engines and Dropdown Menu */}
+          {/* Responsive Navigation Tabs */}
           <nav className="flex items-center p-1 rounded-2xl bg-[#0D1322] border border-slate-800 text-xs shadow-lg shrink-0">
-            {/* Primary Engine 1: Vision OCR (VLM) */}
+            {/* Primary Engine: Vision OCR (VLM) */}
             <button
               type="button"
               disabled={isProcessing}
@@ -220,193 +211,55 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
             </button>
 
-            {/* Primary Engine 2: Digital Text (Fast) */}
+            {/* Live Monitor */}
             <button
               type="button"
-              disabled={isProcessing}
-              onClick={() => {
-                setActiveTab("text");
-                if (setProcessingMode) setProcessingMode("text");
-              }}
-              title="Webpage HTML: Crawl and extract clean Khmer text directly from news articles & webpage links"
-              className={`flex items-center space-x-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-xl font-semibold transition-all duration-200 shrink-0 ${
-                activeTab === "text"
+              onClick={() => setActiveTab("monitor")}
+              className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl font-semibold transition-all duration-200 shrink-0 ${
+                activeTab === "monitor"
                   ? "bg-indigo-600 text-white shadow-md font-bold"
                   : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
-              } disabled:opacity-50`}
+              }`}
+              title="Live Monitor: Live Server-Sent Events (SSE) Telemetry Stream"
             >
-              <Globe className={`h-3.5 w-3.5 ${activeTab === "text" ? "text-white" : "text-cyan-400"}`} />
-              <span className="hidden sm:inline">Webpage HTML</span>
-              <span className="sm:hidden">Webpage</span>
-              <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold uppercase tracking-wider ${
-                activeTab === "text"
-                  ? "bg-white/20 text-white"
-                  : "bg-slate-800 text-slate-400 border border-slate-700/60"
-              }`}>
-                CRAWL
-              </span>
+              <div className="relative">
+                <Terminal className={`h-3.5 w-3.5 ${activeTab === "monitor" ? "text-white" : "text-indigo-400"}`} />
+                <span className="absolute -top-1 -right-1 flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                </span>
+              </div>
+              <span className="hidden sm:inline">Live Monitor</span>
+              <span className="sm:hidden">Monitor</span>
+              {rateLimitHits > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-black text-[9px] font-black animate-pulse">
+                  {rateLimitHits}
+                </span>
+              )}
             </button>
 
-            {/* Vertical Divider */}
-            <div className="h-4 w-px bg-slate-800 mx-1 shrink-0" />
-
-            {/* Responsive Dropdown Menu for Download Links, Monitor & Keys */}
-            <div className="relative" ref={toolsDropdownRef}>
-              <button
-                type="button"
-                onClick={() => setShowToolsDropdown((prev) => !prev)}
-                className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl font-semibold transition-all duration-200 shrink-0 ${
-                  activeTab === "download" || activeTab === "monitor" || activeTab === "keys"
-                    ? "bg-indigo-600 text-white shadow-md font-bold"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
-                }`}
-                title="Tools & Links: Download Links, Live Monitor, Keys Pool"
-              >
-                {activeTab === "download" ? (
-                  <>
-                    <LinkIcon className="h-3.5 w-3.5 text-white" />
-                    <span className="hidden sm:inline">Download Links</span>
-                    <span className="sm:hidden">Links</span>
-                  </>
-                ) : activeTab === "monitor" ? (
-                  <>
-                    <Terminal className="h-3.5 w-3.5 text-white" />
-                    <span className="hidden sm:inline">Live Monitor</span>
-                    <span className="sm:hidden">Monitor</span>
-                  </>
-                ) : activeTab === "keys" ? (
-                  <>
-                    <Key className="h-3.5 w-3.5 text-white" />
-                    <span className="hidden sm:inline">Keys Pool</span>
-                    <span className="sm:hidden">Keys</span>
-                  </>
-                ) : (
-                  <>
-                    <MoreHorizontal className="h-3.5 w-3.5 text-slate-400" />
-                    <span className="hidden sm:inline">Tools</span>
-                  </>
-                )}
-
-                {/* Pulsing indicator if rate limit or live monitor */}
-                {rateLimitHits > 0 && activeTab !== "monitor" && (
-                  <span className="px-1 py-0.2 rounded-full bg-amber-500 text-black text-[8px] font-black animate-pulse">
-                    {rateLimitHits}
-                  </span>
-                )}
-
-                <ChevronDown className={`h-3 w-3 text-slate-400 transition-transform duration-200 ${showToolsDropdown ? "rotate-180 text-white" : ""}`} />
-              </button>
-
-              {/* Dropdown Menu Panel */}
-              {showToolsDropdown && (
-                <div className="absolute right-0 top-full mt-2 w-64 bg-[#0D1322] border border-slate-700 rounded-2xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150 space-y-1">
-                  {/* Item 1: Download Links (Batch) */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveTab("download");
-                      setShowToolsDropdown(false);
-                    }}
-                    className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition-colors ${
-                      activeTab === "download"
-                        ? "bg-indigo-600/20 text-white border border-indigo-500/40"
-                        : "hover:bg-slate-800/80 text-slate-300"
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2.5">
-                      <div className="p-1.5 rounded-lg bg-slate-800 border border-slate-700/60 text-sky-400 shrink-0">
-                        <LinkIcon className="h-4 w-4" />
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-white flex items-center space-x-1.5">
-                          <span>Download Links</span>
-                          <span className="text-[9px] px-1.5 py-0.2 rounded font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700/60 uppercase">
-                            BATCH
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-slate-400 font-khmer">
-                          ទាញយក PDF ច្រើនតាមរយៈ Link
-                        </p>
-                      </div>
-                    </div>
-                    {activeTab === "download" && (
-                      <Check className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-                    )}
-                  </button>
-
-                  {/* Item 2: Live Monitor */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveTab("monitor");
-                      setShowToolsDropdown(false);
-                    }}
-                    className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition-colors ${
-                      activeTab === "monitor"
-                        ? "bg-indigo-600/20 text-white border border-indigo-500/40"
-                        : "hover:bg-slate-800/80 text-slate-300"
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2.5">
-                      <div className="p-1.5 rounded-lg bg-slate-800 border border-slate-700/60 text-indigo-400 shrink-0 relative">
-                        <Terminal className="h-4 w-4" />
-                        <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                        </span>
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-white flex items-center space-x-1.5">
-                          <span>Live Monitor</span>
-                          {rateLimitHits > 0 && (
-                            <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-black text-[9px] font-black animate-pulse">
-                              {rateLimitHits}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[10px] text-slate-400 font-khmer">
-                          តាមដាន SSE Telemetry Stream
-                        </p>
-                      </div>
-                    </div>
-                    {activeTab === "monitor" && (
-                      <Check className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-                    )}
-                  </button>
-
-                  {/* Item 3: Keys Pool */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveTab("keys");
-                      setShowToolsDropdown(false);
-                    }}
-                    className={`w-full flex items-center justify-between p-2 rounded-xl text-left transition-colors ${
-                      activeTab === "keys"
-                        ? "bg-indigo-600/20 text-white border border-indigo-500/40"
-                        : "hover:bg-slate-800/80 text-slate-300"
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2.5">
-                      <div className="p-1.5 rounded-lg bg-slate-800 border border-slate-700/60 text-amber-400 shrink-0">
-                        <Key className="h-4 w-4" />
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-white flex items-center space-x-1.5">
-                          <span>Keys Pool ⚡</span>
-                        </div>
-                        <p className="text-[10px] text-slate-400 font-khmer">
-                          គ្រប់គ្រង និងបង្វិល API Keys
-                        </p>
-                      </div>
-                    </div>
-                    {activeTab === "keys" && (
-                      <Check className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-                    )}
-                  </button>
-                </div>
+            {/* Keys Pool */}
+            <button
+              type="button"
+              onClick={() => setActiveTab("keys")}
+              className={`flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl font-semibold transition-all duration-200 shrink-0 ${
+                activeTab === "keys"
+                  ? "bg-indigo-600 text-white shadow-md font-bold"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
+              }`}
+              title="Keys Pool: Multi-Key Rotation & Scaling Engine"
+            >
+              <Key className={`h-3.5 w-3.5 ${activeTab === "keys" ? "text-white" : "text-amber-400"}`} />
+              <span className="hidden sm:inline">Keys Pool</span>
+              <span className="sm:hidden">Keys</span>
+              {activeKeyCount > 0 && (
+                <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold ${
+                  activeTab === "keys" ? "bg-white/20 text-white" : "bg-slate-800 text-slate-300 border border-slate-700/60"
+                }`}>
+                  {activeKeyCount}
+                </span>
               )}
-            </div>
+            </button>
           </nav>
 
           {/* Right Controls: Model Dropdown, Status, Keys Button */}
