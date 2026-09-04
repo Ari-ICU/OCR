@@ -568,10 +568,24 @@ export const DownloadLinksView: React.FC<DownloadLinksViewProps> = ({
               <span className="text-slate-500 font-medium">សាកល្បង៖</span>
               <button
                 type="button"
+                onClick={() => setWebpageUrl("https://mod.gov.kh/modlibrary/")}
+                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 font-mono text-[11px] border border-slate-700/60 transition-colors"
+              >
+                MOD: ក្រសួងការពារជាតិ (Library)
+              </button>
+              <button
+                type="button"
+                onClick={() => setWebpageUrl("https://moj.gov.kh/kh/law-regular")}
+                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 font-mono text-[11px] border border-slate-700/60 transition-colors"
+              >
+                MOJ: ក្រសួងយុត្តិធម៌ (Law Regular)
+              </button>
+              <button
+                type="button"
                 onClick={() => setWebpageUrl("https://www.interior.gov.kh/library")}
                 className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 font-mono text-[11px] border border-slate-700/60 transition-colors"
               >
-                MOI: ក្រសួងមហាផ្ទៃ (Digital Library)
+                MOI: ក្រសួងមហាផ្ទៃ (Library)
               </button>
               <button
                 type="button"
@@ -1117,11 +1131,33 @@ export const DownloadLinksView: React.FC<DownloadLinksViewProps> = ({
               type="button"
               onClick={() => {
                 setActiveMode("webpage");
+                setWebpageUrl("https://mod.gov.kh/modlibrary/");
+              }}
+              className="text-xs text-sky-400 hover:text-sky-300 underline underline-offset-4 font-khmer"
+            >
+              ក្រសួងការពារជាតិ (MOD Library)
+            </button>
+            <span className="text-slate-600">•</span>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveMode("webpage");
+                setWebpageUrl("https://moj.gov.kh/kh/law-regular");
+              }}
+              className="text-xs text-amber-400 hover:text-amber-300 underline underline-offset-4 font-khmer"
+            >
+              ក្រសួងយុត្តិធម៌ (MOJ Laws)
+            </button>
+            <span className="text-slate-600">•</span>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveMode("webpage");
                 setWebpageUrl("https://www.interior.gov.kh/library");
               }}
               className="text-xs text-emerald-400 hover:text-emerald-300 underline underline-offset-4 font-khmer"
             >
-              សាកល្បងជាមួយបណ្ណាល័យក្រសួងមហាផ្ទៃ (MOI Library)
+              ក្រសួងមហាផ្ទៃ (MOI Library)
             </button>
             <span className="text-slate-600">•</span>
             <button
@@ -1132,7 +1168,7 @@ export const DownloadLinksView: React.FC<DownloadLinksViewProps> = ({
               }}
               className="text-xs text-indigo-400 hover:text-indigo-300 underline underline-offset-4 font-khmer"
             >
-              សាកល្បងជាមួយតំណភ្ជាប់ MOSVY Regulations
+              MOSVY Regulations
             </button>
           </div>
         </div>

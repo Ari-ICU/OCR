@@ -1,6 +1,7 @@
 import json
 import asyncio
 import re
+import html as html_lib
 import urllib.parse
 import httpx
 import logging
@@ -686,17 +687,55 @@ async def crawl_webpage_endpoint(request: Request):
         # 1. Process main page HTML for direct PDF links & document cards
         detail_links = []
         if main_resp:
-            html = main_resp.text
-            title_m = re.search(r'<title[^>]*>(.*?)</title>', html, re.IGNORECASE | re.DOTALL)
+            page_html = main_resp.text
+            title_m = re.search(r'<title[^>]*>(.*?)</title>', page_html, re.IGNORECASE | re.DOTALL)
             if title_m:
-                page_title = re.sub(r'<[^>]+>', '', title_m.group(1)).strip()
+                page_title = html_lib.unescape(re.sub(r'<[^>]+>', '', title_m.group(1)).strip())
 
-            direct_links = re.findall(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', html, re.DOTALL | re.IGNORECASE)
+            # Check for government law catalog tables (e.g. moj.gov.kh/kh/law-regular)
+            if "download?key=" in page_html or "law-regular" in clean_url:
+                table_rows = re.findall(r'<tr[^>]*>(.*?)</tr>', page_html, re.DOTALL | re.IGNORECASE)
+                for row in table_rows:
+                    cols = re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL | re.IGNORECASE)
+                    if len(cols) >= 5:
+                        raw_id = re.sub(r'<[^>]+>', '', cols[0]).strip()
+                        raw_title = re.sub(r'<[^>]+>', '', cols[1]).strip()
+                        if not raw_title:
+                            continue
+                        
+                        # Col 4: Khmer PDF download
+                        kh_links = re.findall(r'href=["\']([^"\']+)["\']', cols[4])
+                        if kh_links and "javascript:" not in kh_links[0]:
+                            kh_url = urllib.parse.urljoin(clean_url, kh_links[0].strip())
+                            if kh_url not in seen_pdf_urls:
+                                fn = f"{raw_id}-{raw_title[:45].strip()}.pdf" if raw_id else f"{raw_title[:50].strip()}.pdf"
+                                pdfs.append({
+                                    "title": raw_title,
+                                    "url": kh_url,
+                                    "filename": fn
+                                })
+                                seen_pdf_urls.add(kh_url)
+
+                        # Col 5: English PDF if available
+                        if len(cols) >= 6:
+                            en_links = re.findall(r'href=["\']([^"\']+)["\']', cols[5])
+                            if en_links and "javascript:" not in en_links[0] and "lan=en" in en_links[0]:
+                                en_url = urllib.parse.urljoin(clean_url, en_links[0].strip())
+                                if en_url not in seen_pdf_urls:
+                                    fn_en = f"{raw_id}-English.pdf" if raw_id else f"{raw_title[:45]}-English.pdf"
+                                    pdfs.append({
+                                        "title": f"{raw_title} (English)",
+                                        "url": en_url,
+                                        "filename": fn_en
+                                    })
+                                    seen_pdf_urls.add(en_url)
+
+            direct_links = re.findall(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', page_html, re.DOTALL | re.IGNORECASE)
             seen_detail_urls = set()
 
             for href, content in direct_links:
                 full_url = urllib.parse.urljoin(clean_url, href.strip())
-                clean_text = re.sub(r'<[^>]+>', '', content).strip()
+                clean_text = html_lib.unescape(re.sub(r'<[^>]+>', '', content).strip())
 
                 if ".pdf" in full_url.lower():
                     if full_url not in seen_pdf_urls:
@@ -780,7 +819,27 @@ async def crawl_webpage_endpoint(request: Request):
                     })
                     seen_pdf_urls.add(clean_ep)
 
-        # 5. If fewer than 5 PDFs found, quickly inspect up to 5 document subpages
+        # 5. Check if fewer than 5 PDFs found on moj.gov.kh: inspect book-library
+        if len(pdfs) < 5 and "moj.gov.kh" in clean_url:
+            try:
+                moj_book_resp = await client.get("https://moj.gov.kh/kh/book-library", timeout=6.0)
+                if moj_book_resp.status_code == 200:
+                    book_pdfs = re.findall(r'href=["\']([^"\']+\.pdf[^"\']*)["\']', moj_book_resp.text, re.IGNORECASE)
+                    for bp in book_pdfs:
+                        full_bp = urllib.parse.urljoin("https://moj.gov.kh/kh/book-library", bp.strip())
+                        if full_bp not in seen_pdf_urls:
+                            fn_bp = urllib.parse.unquote(full_bp.split("/")[-1].split("?")[0])
+                            t_bp = fn_bp.replace(".pdf", "").replace("_", " ")
+                            pdfs.append({
+                                "title": t_bp,
+                                "url": full_bp,
+                                "filename": fn_bp
+                            })
+                            seen_pdf_urls.add(full_bp)
+            except Exception:
+                pass
+
+        # 6. If fewer than 5 PDFs found, quickly inspect up to 5 document subpages
         if len(pdfs) < 5 and detail_links:
             async def fetch_subpage(item):
                 try:
