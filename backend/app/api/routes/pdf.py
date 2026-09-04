@@ -398,10 +398,18 @@ def detect_pdf_language(title: str, filename: str, url: str) -> Tuple[str, bool]
     combined = f"{title} {filename} {urllib.parse.unquote(url)}".lower()
     has_khmer_script = bool(re.search(r"[\u1780-\u17FF\u19E0-\u19FF]", f"{title} {filename}"))
 
-    # Explicit English markers: e.g. _eng.pdf, -eng.pdf, _english.pdf, english-1, eng-final
+    # 1. Any file with Khmer Unicode characters is 100% Khmer
+    if has_khmer_script:
+        if re.search(r"(_eng|-eng|_english|-english)\.pdf$", filename, re.I):
+            return "english", False
+        return "khmer", True
+
+    # 2. Explicit English version tags in filename: e.g. _eng.pdf, -eng.pdf, _english.pdf, english-1, eng-final
     has_explicit_english = bool(
-        re.search(r"(_eng|-eng|_english|-english|eng-final|full-eng|english-1)\b", combined)
-        or "english" in combined
+        re.search(r"(_eng|-eng|_english|-english|eng-final|full-eng|english-1)\.pdf$", filename, re.I)
+        or re.search(r"(_eng|-eng|_english|-english|eng-final|full-eng|english-1)\b", combined)
+        or re.search(r"(-english|_english)\.pdf$", filename, re.I)
+        or "achievement-of-social-assistance" in combined
     )
     # Explicit Khmer markers & Cambodian legal terms (Prakas = ប្រកាស, Anukret = អនុក្រឹត្យ, Kram = ក្រម, etc.)
     has_explicit_khmer = bool(
@@ -409,18 +417,11 @@ def detect_pdf_language(title: str, filename: str, url: str) -> Tuple[str, bool]
     )
 
     # If it specifies an English translation explicitly (e.g., Final-Prakas-...-English.pdf)
-    if has_explicit_english and not has_khmer_script and not ("_kh" in combined or "khmer" in combined or "-kh-" in combined):
+    if has_explicit_english and not ("_kh" in combined or "khmer" in combined or "-kh-" in combined):
         return "english", False
 
-    # Any file with Khmer script, Khmer tags, or legal terms like Prakas is Khmer!
-    if has_khmer_script or has_explicit_khmer:
-        return "khmer", True
-
-    # If title/filename consists of English words (e.g. Achievement of Social Assistance Programmes):
-    latin_words = len(re.findall(r"[a-zA-Z]{3,}", combined))
-    if latin_words >= 3:
-        return "english", False
-
+    # In Cambodian government portals, all other official decrees, plans, and scanned documents
+    # (e.g. SP_SSW-2022-2031-Signed.pdf, 02-Prakas..., Scan_0001.pdf) are Khmer documents!
     return "khmer", True
 
 
@@ -503,13 +504,18 @@ async def fetch_url_endpoint(request: Request):
                     pages_to_check = min(len(doc), 5)
                     extracted_text = " ".join([doc[i].get_text("text") for i in range(pages_to_check)])
                     doc.close()
-                    if PDFService.has_khmer_text(extracted_text):
+
+                    k_count = len(re.findall(r"[\u1780-\u17D3]", extracted_text))
+                    l_count = len(re.findall(r"[a-zA-Z]", extracted_text))
+
+                    # 1. If it contains digital Khmer characters -> KHMER!
+                    if k_count > 0:
                         has_khmer_content = True
-                    elif PDFService.is_english_dominant_content(extracted_text):
+                    # 2. If it contains substantial English digital text (>80 chars) and 0 Khmer -> ENGLISH!
+                    elif l_count > 80 and k_count == 0:
                         is_english_only = True
+                    # 3. If text is empty (scanned image PDF like SP_SSW... or 02-Prakas...) -> KHMER!
                     else:
-                        # Scanned image PDF with no digital text layer (e.g. 02-Prakas-on-CTP-PF-Implementation.pdf)
-                        # Check filename / metadata heuristic:
                         lang_by_name, is_khmer_by_name = detect_pdf_language(filename, filename, clean_url)
                         if is_khmer_by_name:
                             has_khmer_content = True
