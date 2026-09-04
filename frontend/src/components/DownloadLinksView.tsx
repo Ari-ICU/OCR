@@ -19,13 +19,7 @@ import {
   Search,
   CheckSquare,
   Square,
-  Check,
-  Sparkles,
-  Layers,
-  ArrowRight,
-  Filter,
   ShieldCheck,
-  AlertTriangle
 } from "lucide-react";
 import { API_BASE_URL } from "../config/api";
 

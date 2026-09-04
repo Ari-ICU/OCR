@@ -405,7 +405,7 @@ def detect_pdf_language(title: str, filename: str, url: str) -> Tuple[str, bool]
     )
     # Explicit Khmer markers & Cambodian legal terms (Prakas = ប្រកាស, Anukret = អនុក្រឹត្យ, Kram = ក្រម, etc.)
     has_explicit_khmer = bool(
-        re.search(r"(_kh|-kh|_khm|-khm|_khmer|-khmer|khmer|prakas|anukret|kram|chbab|sarachor|samrech|cam_lv|ssw)", combined)
+        re.search(r"(_kh|-kh|_khm|-khm|_khmer|-khmer|khmer|prakas|anukret|kram|chbab|sarachor|samrech)", combined)
     )
 
     # If it specifies an English translation explicitly (e.g., Final-Prakas-...-English.pdf)
@@ -416,10 +416,11 @@ def detect_pdf_language(title: str, filename: str, url: str) -> Tuple[str, bool]
     if has_khmer_script or has_explicit_khmer:
         return "khmer", True
 
-    if has_explicit_english:
+    # If title/filename consists of English words (e.g. Achievement of Social Assistance Programmes):
+    latin_words = len(re.findall(r"[a-zA-Z]{3,}", combined))
+    if latin_words >= 3:
         return "english", False
 
-    # On Cambodian domains or government portals, standard documents and scans are Khmer by default
     return "khmer", True
 
 
@@ -672,17 +673,14 @@ async def crawl_webpage_endpoint(request: Request):
                 if isinstance(sub, list):
                     pdfs.extend(sub)
 
-    # Categorize language for all discovered PDFs
-    enriched_pdfs = []
-    for p in pdfs:
-        lang, is_khmer = detect_pdf_language(p.get("title", ""), p.get("filename", ""), p.get("url", ""))
-        enriched_pdfs.append({
-            "title": p.get("title", ""),
-            "url": p.get("url", ""),
-            "filename": p.get("filename", ""),
-            "language": lang,
-            "has_khmer": is_khmer
-        })
+        enriched_pdfs = []
+        for p in pdfs:
+            lang, is_khmer = detect_pdf_language(p.get("title", ""), p.get("filename", ""), p.get("url", ""))
+            enriched_pdfs.append({
+                **p,
+                "language": lang,
+                "has_khmer": is_khmer
+            })
 
     khmer_count = sum(1 for p in enriched_pdfs if p["has_khmer"])
     english_count = sum(1 for p in enriched_pdfs if not p["has_khmer"])
