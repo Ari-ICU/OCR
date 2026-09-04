@@ -1,101 +1,116 @@
-# 🚀 Production Server Deployment Guide (SSH `name@ip`)
+# 🚀 Server Deployment Guide (SSH `username@ip` + Password)
 
-This guide walks you through deploying **KhmerPDF Vision OCR** natively on your remote Linux server (Ubuntu/Debian) using **PM2 & Nginx**.
+This guide walks you through deploying **KhmerPDF Vision OCR** to any remote Linux server (Ubuntu/Debian), such as a **school / university server, lab machine, dedicated physical server, or VPS**, when you are provided with an **IP, Username, and Password**.
 
 ---
 
 ## 📋 Architecture Overview
 
-- **Host Reverse Proxy**: Nginx (Listens on port 80/443, handles SSL, routes `/api/` to FastAPI and `/` to Next.js)
+- **Host Reverse Proxy**: Nginx (Listens on port 80, forwards `/api/` to FastAPI and `/` to Next.js)
 - **Frontend**: Next.js (Runs locally on `127.0.0.1:3000` via PM2)
 - **Backend**: FastAPI + Uvicorn (Runs locally on `127.0.0.1:8000` with 2 workers via PM2)
-- **Process Manager**: PM2 (Auto-restarts on crash, memory limits, and starts on system boot)
+- **Process Manager**: PM2 (Auto-restarts on crash, memory limits, and auto-starts on boot)
 
 ---
 
-## 1️⃣ Connect to Your Server
+## 1️⃣ Connect to the Server (SSH)
 
-From your local machine terminal:
+Open your **Terminal** app on your computer (Mac / Linux / Windows PowerShell):
 
 ```bash
-ssh username@your_server_ip
+ssh YOUR_USER@YOUR_SERVER_IP
 ```
-*(Replace `username` with your server user, e.g. `root` or `ubuntu`, and `your_server_ip` with your server IP address)*
+*Example: `ssh student@192.168.1.100` or `ssh root@103.120.45.10`*
+
+1. When prompted: `Are you sure you want to continue connecting (yes/no)?` ➔ Type **`yes`** and press Enter.
+2. When prompted for `password:` ➔ Type your server password and press Enter.
+   > [!NOTE]
+   > Linux terminals **do not display asterisks or dots** when you type your password for security. Simply type it accurately and press Enter.
 
 ---
 
 ## 2️⃣ Install Server Prerequisites
 
-Run the following commands on your server to install Python, Node.js, Nginx, and PM2:
+Once logged in to the server terminal, run this command to install Python 3, Node.js, npm, Nginx, and PM2:
 
 ```bash
-# Update package index
+# 1. Update package list
 sudo apt update && sudo apt upgrade -y
 
-# Install Python 3, venv, Node.js, npm, Nginx, Git, build tools
+# 2. Install Python 3, venv, Node.js, npm, Nginx, Git, build tools
 sudo apt install -y python3 python3-venv python3-pip nodejs npm nginx git curl build-essential
 
-# Install PM2 globally
+# 3. Install PM2 process manager globally
 sudo npm install -g pm2
 ```
+*(Enter your password if prompted for `[sudo]`)*
 
 ---
 
-## 3️⃣ Transfer or Clone Code to the Server
+## 3️⃣ Transfer Your Code to the Server
+
+Choose either **Option A** (using Git) or **Option B** (direct transfer from your Mac):
 
 ### Option A: Using Git (Recommended)
+Inside your server terminal:
 ```bash
-git clone <your-git-repo-url> /var/www/khmer-ocr
-cd /var/www/khmer-ocr
+git clone <your-git-repository-url> ~/khmer-ocr
+cd ~/khmer-ocr
 ```
 
-### Option B: Using `rsync` from your local machine
-Run this from your **local machine** terminal:
+### Option B: Direct Copy from Your Mac (No Git needed)
+Open a **new tab in your Mac terminal** (`Cmd + T`) and run `rsync` from your project folder:
 ```bash
-rsync -avz --exclude '.venv' --exclude 'node_modules' --exclude '.next' /Users/thoeurnratha/Desktop/pdf-text/ username@your_server_ip:/var/www/khmer-ocr
+rsync -avz --exclude '.venv' --exclude 'node_modules' --exclude '.next' --exclude '__pycache__' /Users/thoeurnratha/Desktop/pdf-text/ YOUR_USER@YOUR_SERVER_IP:~/khmer-ocr
 ```
+*(Enter your server password when prompted. All project files will copy straight to `~/khmer-ocr`).*
 
 ---
 
 ## 4️⃣ Configure Environment Variables
 
+Inside your server terminal:
+
 ```bash
-cd /var/www/khmer-ocr
+cd ~/khmer-ocr
 cp .env.example .env
 cp .env.example backend/.env
 nano backend/.env
 ```
 
-Set your Gemini API key:
+Set your **Gemini API Key**:
 ```ini
 GEMINI_API_KEY=AIzaSy...
 NEXT_PUBLIC_API_URL=
 ```
-*(Tip: Leaving `NEXT_PUBLIC_API_URL=` blank allows the frontend to automatically communicate with `/api/` through Nginx without CORS or IP hardcoding).*
+> [!TIP]
+> Leave `NEXT_PUBLIC_API_URL=` blank. The frontend automatically detects the server's IP address and routes all requests through Nginx without hardcoding.
+
+Press `Ctrl + O` then `Enter` to save, and `Ctrl + X` to exit `nano`.
 
 ---
 
-## 5️⃣ Run Automated Deployment Script
+## 5️⃣ Run Automated Deployment
 
-The included [`deploy.sh`](file:///Users/thoeurnratha/Desktop/pdf-text/deploy.sh) script automatically sets up the Python virtual environment, installs backend dependencies, builds the Next.js frontend production bundle, and launches everything via PM2:
+The [`deploy.sh`](file:///Users/thoeurnratha/Desktop/pdf-text/deploy.sh) script automatically sets up the Python virtual environment (`.venv`), installs all backend dependencies, builds the Next.js production bundle, and starts everything under PM2:
 
 ```bash
 chmod +x deploy.sh
 ./deploy.sh
 ```
 
-### PM2 Process Commands:
+### Useful PM2 Management Commands:
 ```bash
 # Check status of running backend and frontend services
 pm2 status
 
-# View live real-time logs
+# View live real-time logs (with timestamps)
 pm2 logs
 
-# Restart services
+# Restart both services
 pm2 restart all
 
-# Ensure services automatically restart on server reboot
+# Ensure services automatically start on server reboot
 pm2 startup
 pm2 save
 ```
@@ -123,61 +138,62 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-Your app is now live at `http://your_server_ip`!
+---
+
+## 7️⃣ Access Your Application! 🌐
+
+Open your web browser (Chrome, Safari, Firefox, Edge) on your laptop or mobile phone:
+
+👉 **`http://YOUR_SERVER_IP`**
+
+*(Example: `http://192.168.1.100` or `http://103.120.45.10`)*
+
+No port numbers are required in the URL! Nginx automatically routes web traffic on port 80 to Next.js and `/api/` to FastAPI.
 
 ---
 
-## 7️⃣ Configure Firewall (UFW)
+## 8️⃣ Health Check & Verification
 
-Make sure essential ports are permitted:
-```bash
-sudo ufw allow 22/tcp    # SSH
-sudo ufw allow 80/tcp    # HTTP
-sudo ufw allow 443/tcp   # HTTPS
-sudo ufw enable
-```
-
----
-
-## 8️⃣ Free SSL / HTTPS (Let's Encrypt Certbot)
-
-Once you point your domain (e.g. `ocr.yourdomain.com`) to `your_server_ip`:
+To verify that the system is operating normally from the server terminal:
 
 ```bash
-sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d ocr.yourdomain.com
-```
-
-Certbot will automatically install SSL certificates, configure HTTPS, redirect HTTP to HTTPS, and schedule automated renewal cron jobs.
-
----
-
-## 9️⃣ Verification & Health Check
-
-Test that all components are responding:
-
-```bash
-# Verify backend API health
+# 1. Test backend health
 curl http://127.0.0.1:8000/api/health
 
-# Verify key pool status
+# 2. Test key pool status
 curl http://127.0.0.1:8000/api/key-pool-status
 
-# Verify frontend response
+# 3. Test frontend HTTP response
 curl -I http://127.0.0.1:3000/
 
-# Verify Nginx proxying
+# 4. Test Nginx routing
 curl -I http://localhost/api/health
 ```
-
-Expected output includes `{"status":"ok","active_models":...}`.
+Expected output: `{"status":"ok","active_models":...}`.
 
 ---
 
-## 🛡️ Built-in Production Hardening
+## ❓ Troubleshooting & FAQs
 
-1. **SSRF Defense:** Remote URL fetcher blocks loopback, private subnets, link-local addresses, and cloud provider metadata IPs (`169.254.169.254`).
-2. **File Upload Security:** Magic byte header inspection (`%PDF`, JPEG, PNG, WebP) and a 100MB upload cap with path traversal sanitization.
-3. **Localhost Binding:** Backend (`127.0.0.1:8000`) and frontend (`127.0.0.1:3000`) only listen locally. All public access goes strictly through Nginx.
-4. **Rate Limiting:** Sliding-window in-memory IP rate limiter to protect against abuse and quota exhaustion.
-5. **Security Headers:** `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `X-XSS-Protection: 1; mode=block`, and `Referrer-Policy: strict-origin-when-cross-origin`.
+#### Q: What if my teacher's server already uses Port 80 for another website?
+If Port 80 is occupied by an existing Apache/Nginx site on the server:
+1. Edit `nginx.conf`: Change `listen 80;` to an unused port like `listen 8080;`.
+2. Reload Nginx: `sudo systemctl reload nginx`.
+3. You can now access your app at `http://YOUR_SERVER_IP:8080`.
+
+#### Q: What if I don't have `sudo` permissions on the server?
+If your teacher gave you a student account without `sudo` access:
+1. You can run PM2 directly without Nginx!
+2. In `ecosystem.config.js`, change `127.0.0.1` to `0.0.0.0`:
+   - Backend: `--host 0.0.0.0 --port 8000`
+   - Frontend: `-p 3000 -H 0.0.0.0`
+3. In `backend/.env`, set `NEXT_PUBLIC_API_URL=http://YOUR_SERVER_IP:8000`.
+4. Rebuild frontend: `cd frontend && npm run build && cd ..`.
+5. Restart PM2: `pm2 restart all`.
+6. Access your app directly at `http://YOUR_SERVER_IP:3000`.
+
+#### Q: Where are the application logs located?
+All service logs with timestamps are stored in:
+- Backend: `~/khmer-ocr/logs/backend-out.log` and `~/khmer-ocr/logs/backend-error.log`
+- Frontend: `~/khmer-ocr/logs/frontend-out.log` and `~/khmer-ocr/logs/frontend-error.log`
+- Live viewer: `pm2 logs`

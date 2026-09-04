@@ -17,6 +17,7 @@ An enterprise-grade, high-performance system for extracting, digitizing, and res
   - [1. Backend Setup](#1-backend-setup)
   - [2. Frontend Setup](#2-frontend-setup)
   - [3. Getting Free Gemini API Keys](#3-getting-free-gemini-api-keys)
+- [🌐 Production Server Deployment (PM2 + Nginx)](#-production-server-deployment-pm2--nginx)
 - [🖥️ Using the Web Application](#️-using-the-web-application)
   - [Tab 1: PDF Extraction (`#pdf`)](#tab-1-pdf-extraction-pdf)
   - [Tab 2: Live Activity Monitor (`#monitor`)](#tab-2-live-activity-monitor-monitor)
@@ -116,6 +117,37 @@ npm run dev
 4. Open the web app, go to the **API Keys Tab (`#keys`)**, paste your key(s), and click **"Save & Activate Pool"**.
 
 *(Tip: You can paste multiple keys from different Google accounts to increase your daily extraction speed!)*
+
+---
+
+## 🌐 Production Server Deployment (PM2 + Nginx)
+
+For full step-by-step instructions on deploying to a remote Linux server (such as a school/university server, dedicated machine, or VPS) using SSH, see our dedicated **[Production Server Deployment Guide](PRODUCTION_DEPLOYMENT.md)**.
+
+### Quick Deployment on Ubuntu / Debian Server:
+
+```bash
+# 1. Connect to your server
+ssh username@server_ip
+
+# 2. Install prerequisites
+sudo apt update && sudo apt install -y python3 python3-venv python3-pip nodejs npm nginx git
+sudo npm install -g pm2
+
+# 3. Clone and deploy
+git clone <your-repo-url> ~/khmer-ocr
+cd ~/khmer-ocr
+cp .env.example backend/.env  # edit backend/.env to set GEMINI_API_KEY
+chmod +x deploy.sh
+./deploy.sh
+
+# 4. Enable Nginx reverse proxy
+sudo cp nginx.conf /etc/nginx/sites-available/khmer-ocr
+sudo ln -s /etc/nginx/sites-available/khmer-ocr /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl reload nginx
+```
+Open **`http://YOUR_SERVER_IP`** in any web browser!
 
 ---
 
