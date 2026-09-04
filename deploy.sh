@@ -43,10 +43,13 @@ if command -v pm2 &> /dev/null; then
     pm2 save
     echo "✅ PM2 services active! Run 'pm2 status' or 'pm2 logs' to monitor."
 else
-    echo "💡 PM2 not found. You can run services via Docker Compose or Systemd:"
-    echo "   Docker:  docker compose up -d --build"
-    echo "   Manual:  ./.venv/bin/uvicorn main:app --app-dir backend --host 0.0.0.0 --port 8000 &"
-    echo "            npm start --prefix frontend -- -p 3000 -H 0.0.0.0 &"
+    echo "⚠️  PM2 not found. Install PM2 for automated background process management:"
+    echo "   sudo npm install -g pm2"
+    echo "   pm2 startOrReload ecosystem.config.js"
+    echo ""
+    echo "💡 Or run manually in the background:"
+    echo "   ./.venv/bin/uvicorn main:app --app-dir backend --host 127.0.0.1 --port 8000 &"
+    echo "   npm start --prefix frontend -- -p 3000 -H 127.0.0.1 &"
 fi
 
 echo "=========================================="

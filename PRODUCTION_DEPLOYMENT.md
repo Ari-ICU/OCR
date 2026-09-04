@@ -1,15 +1,15 @@
 # 🚀 Production Server Deployment Guide (SSH `name@ip`)
 
-This guide walks you through deploying **KhmerPDF Vision OCR** to a remote Linux server (Ubuntu/Debian) using SSH.
+This guide walks you through deploying **KhmerPDF Vision OCR** natively on your remote Linux server (Ubuntu/Debian) using **PM2 & Nginx**.
 
 ---
 
-## 📋 Overview of Deployment Methods
+## 📋 Architecture Overview
 
-| Method | Recommended For | Commands Required |
-| :--- | :--- | :--- |
-| **Method 1: Docker Compose** *(Recommended)* | Cleanest, fully containerized, isolated dependencies | `docker compose up -d --build` |
-| **Method 2: PM2 / Systemd + Nginx** | Bare-metal VPS, direct system performance | `./deploy.sh` |
+- **Host Reverse Proxy**: Nginx (Listens on port 80/443, handles SSL, routes `/api/` to FastAPI and `/` to Next.js)
+- **Frontend**: Next.js (Runs locally on `127.0.0.1:3000` via PM2)
+- **Backend**: FastAPI + Uvicorn (Runs locally on `127.0.0.1:8000` with 2 workers via PM2)
+- **Process Manager**: PM2 (Auto-restarts on crash, memory limits, and starts on system boot)
 
 ---
 
@@ -24,114 +24,112 @@ ssh username@your_server_ip
 
 ---
 
-## 2️⃣ Transfer or Clone Code to the Server
+## 2️⃣ Install Server Prerequisites
 
-### Option A: Using Git (Easiest)
+Run the following commands on your server to install Python, Node.js, Nginx, and PM2:
+
+```bash
+# Update package index
+sudo apt update && sudo apt upgrade -y
+
+# Install Python 3, venv, Node.js, npm, Nginx, Git, build tools
+sudo apt install -y python3 python3-venv python3-pip nodejs npm nginx git curl build-essential
+
+# Install PM2 globally
+sudo npm install -g pm2
+```
+
+---
+
+## 3️⃣ Transfer or Clone Code to the Server
+
+### Option A: Using Git (Recommended)
 ```bash
 git clone <your-git-repo-url> /var/www/khmer-ocr
 cd /var/www/khmer-ocr
 ```
 
 ### Option B: Using `rsync` from your local machine
-Run this from your **local machine** terminal (not inside the SSH session):
+Run this from your **local machine** terminal:
 ```bash
 rsync -avz --exclude '.venv' --exclude 'node_modules' --exclude '.next' /Users/thoeurnratha/Desktop/pdf-text/ username@your_server_ip:/var/www/khmer-ocr
 ```
 
 ---
 
-## 3️⃣ Set Up Environment Variables
+## 4️⃣ Configure Environment Variables
 
-On the remote server, copy the environment template:
 ```bash
 cd /var/www/khmer-ocr
 cp .env.example .env
 cp .env.example backend/.env
 nano backend/.env
 ```
-Add your **Gemini API Key** (or multiple keys separated by commas):
+
+Set your Gemini API key:
 ```ini
 GEMINI_API_KEY=AIzaSy...
 NEXT_PUBLIC_API_URL=
 ```
-*(Tip: Leaving `NEXT_PUBLIC_API_URL=` blank allows the frontend to automatically detect your server's IP address or Nginx domain without hardcoding).*
+*(Tip: Leaving `NEXT_PUBLIC_API_URL=` blank allows the frontend to automatically communicate with `/api/` through Nginx without CORS or IP hardcoding).*
 
 ---
 
-## 4️⃣ Deployment Method 1: Docker Compose (Recommended)
+## 5️⃣ Run Automated Deployment Script
 
-### Step 1: Install Docker & Docker Compose (if not already installed)
+The included [`deploy.sh`](file:///Users/thoeurnratha/Desktop/pdf-text/deploy.sh) script automatically sets up the Python virtual environment, installs backend dependencies, builds the Next.js frontend production bundle, and launches everything via PM2:
+
 ```bash
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-sudo usermod -aG docker $USER
-```
-
-### Step 2: Launch the Application
-```bash
-cd /var/www/khmer-ocr
-docker compose up -d --build
-```
-
-### Step 3: Check Status & Logs
-```bash
-# Check running containers
-docker compose ps
-
-# View live backend and frontend logs
-docker compose logs -f
-```
-
-Your app is now live at:
-- **Web App**: `http://your_server_ip` (Port 80 via Nginx)
-- **Direct Frontend**: `http://your_server_ip:3000`
-- **Backend API**: `http://your_server_ip:8000/docs`
-
----
-
-## 5️⃣ Deployment Method 2: Native Node.js & Python with PM2
-
-If you prefer running services directly on the host without Docker:
-
-### Step 1: Install System Prerequisites
-```bash
-sudo apt update && sudo apt install -y python3-venv python3-pip nodejs npm nginx curl build-essential
-sudo npm install -g pm2
-```
-
-### Step 2: Run the Deployment Script
-```bash
-cd /var/www/khmer-ocr
 chmod +x deploy.sh
 ./deploy.sh
 ```
 
-### Step 3: Configure Host Nginx
+### PM2 Process Commands:
 ```bash
-# Copy nginx site config
-sudo cp nginx-host.conf /etc/nginx/sites-available/khmer-ocr
-sudo ln -s /etc/nginx/sites-available/khmer-ocr /etc/nginx/sites-enabled/
-sudo rm -f /etc/nginx/sites-enabled/default
-
-# Test and reload Nginx
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
-### Step 4: Manage Services with PM2
-```bash
+# Check status of running backend and frontend services
 pm2 status
+
+# View live real-time logs
 pm2 logs
+
+# Restart services
 pm2 restart all
+
+# Ensure services automatically restart on server reboot
 pm2 startup
 pm2 save
 ```
 
 ---
 
-## 6️⃣ Firewall Configuration (UFW)
+## 6️⃣ Configure Nginx Reverse Proxy
 
-Make sure the essential ports are open:
+Copy the preconfigured [`nginx.conf`](file:///Users/thoeurnratha/Desktop/pdf-text/nginx.conf) to your Nginx sites directory:
+
+```bash
+# Copy site configuration
+sudo cp nginx.conf /etc/nginx/sites-available/khmer-ocr
+
+# Enable site by creating a symlink
+sudo ln -s /etc/nginx/sites-available/khmer-ocr /etc/nginx/sites-enabled/
+
+# Remove default site if present
+sudo rm -f /etc/nginx/sites-enabled/default
+
+# Test configuration for syntax errors
+sudo nginx -t
+
+# Reload Nginx to apply changes
+sudo systemctl reload nginx
+```
+
+Your app is now live at `http://your_server_ip`!
+
+---
+
+## 7️⃣ Configure Firewall (UFW)
+
+Make sure essential ports are permitted:
 ```bash
 sudo ufw allow 22/tcp    # SSH
 sudo ufw allow 80/tcp    # HTTP
@@ -141,58 +139,45 @@ sudo ufw enable
 
 ---
 
-## 7️⃣ Free SSL / HTTPS (Let's Encrypt Certbot)
+## 8️⃣ Free SSL / HTTPS (Let's Encrypt Certbot)
 
 Once you point your domain (e.g. `ocr.yourdomain.com`) to `your_server_ip`:
+
 ```bash
 sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d ocr.yourdomain.com
 ```
-Certbot will automatically configure HTTPS, HTTP-to-HTTPS redirect, and automated certificate renewals!
+
+Certbot will automatically install SSL certificates, configure HTTPS, redirect HTTP to HTTPS, and schedule automated renewal cron jobs.
 
 ---
 
-## 8️⃣ Health Check Verification
+## 9️⃣ Verification & Health Check
 
-Test that everything is operating normally:
+Test that all components are responding:
+
 ```bash
-# Backend health
-curl http://localhost:8000/api/health
+# Verify backend API health
+curl http://127.0.0.1:8000/api/health
 
-# Key pool status
-curl http://localhost:8000/api/key-pool-status
+# Verify key pool status
+curl http://127.0.0.1:8000/api/key-pool-status
 
-# Verify security module
-cd backend && python3 -c "from app.core.security import is_safe_url, validate_file_signature, sanitize_filename; print('Security module verified!')"
+# Verify frontend response
+curl -I http://127.0.0.1:3000/
+
+# Verify Nginx proxying
+curl -I http://localhost/api/health
 ```
-You should see `{"status":"ok","active_models":...}`.
+
+Expected output includes `{"status":"ok","active_models":...}`.
 
 ---
 
-## 🛡️ Built-in Production Security Protections
+## 🛡️ Built-in Production Hardening
 
-Your deployment is hardened with the following defenses:
-
-1. **SSRF (Server-Side Request Forgery) Defense:**
-   - Remote URL fetcher blocks loopback, RFC 1918 private subnets, link-local addresses, and cloud provider metadata IPs (`169.254.169.254`).
-2. **File Upload Security & Magic Byte Inspection:**
-   - Validates file headers/signatures (`%PDF`, JPEG, PNG, WebP) to prevent disguised executable uploads.
-   - Enforces a 100MB upload cap (`MAX_UPLOAD_SIZE_MB`) against memory exhaustion (DoS).
-   - Filename sanitization against Path Traversal (`../../`).
-3. **Network Isolation (Docker):**
-   - Port 8000 (FastAPI) and Port 3000 (Next.js) are bound strictly to `127.0.0.1` so external traffic cannot bypass Nginx. Only ports `80` and `443` are exposed publicly.
-4. **Non-Root Containers:**
-   - Frontend runs under unprivileged `node` user.
-   - Backend runs under unprivileged `appuser` (UID 1000).
-5. **Rate Limiting:**
-   - Sliding-window in-memory IP rate limiter to protect against spam and quota exhaustion.
-6. **HTTP Security Headers:**
-   - `X-Frame-Options: SAMEORIGIN` (prevents Clickjacking).
-   - `X-Content-Type-Options: nosniff` (prevents MIME-type sniffing).
-   - `X-XSS-Protection: 1; mode=block`.
-   - `server_tokens off;` (hides Nginx version).
-   - `Referrer-Policy: strict-origin-when-cross-origin`.
-7. **Credentials & Secrets Protection:**
-   - `.env` files are git-ignored.
-   - Keys displayed in UI are masked (e.g. `AIza...eEwW`).
-
+1. **SSRF Defense:** Remote URL fetcher blocks loopback, private subnets, link-local addresses, and cloud provider metadata IPs (`169.254.169.254`).
+2. **File Upload Security:** Magic byte header inspection (`%PDF`, JPEG, PNG, WebP) and a 100MB upload cap with path traversal sanitization.
+3. **Localhost Binding:** Backend (`127.0.0.1:8000`) and frontend (`127.0.0.1:3000`) only listen locally. All public access goes strictly through Nginx.
+4. **Rate Limiting:** Sliding-window in-memory IP rate limiter to protect against abuse and quota exhaustion.
+5. **Security Headers:** `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`, `X-XSS-Protection: 1; mode=block`, and `Referrer-Policy: strict-origin-when-cross-origin`.
