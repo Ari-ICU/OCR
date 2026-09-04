@@ -597,6 +597,14 @@ class AIService:
                             model=model_name,
                             contents=prompt
                         )
+                        if cls.is_cancelled(session_id):
+                            return {
+                                "success": False,
+                                "corrected_text": "",
+                                "model_used": "cancelled",
+                                "elapsed_seconds": 0.0,
+                                "error": "Processing cancelled by user"
+                            }
                         if response.text:
                             elapsed = round(time.time() - start_time, 2)
                             raw_resp = response.text.strip()
@@ -671,6 +679,14 @@ class AIService:
                     finally:
                         key_pool.release_key(current_key)
                 except Exception as e:
+                    if cls.is_cancelled(session_id):
+                        return {
+                            "success": False,
+                            "corrected_text": "",
+                            "model_used": "cancelled",
+                            "elapsed_seconds": 0.0,
+                            "error": "Processing cancelled by user"
+                        }
                     last_error = str(e)
                     is_invalid_key = (
                         ("401" in last_error or "UNAUTHENTICATED" in last_error or "ACCOUNT_STATE_INVALID" in last_error or "deleted or disabled" in last_error.lower())
@@ -718,7 +734,8 @@ class AIService:
                                 page_number=page_number,
                                 details={"attempt": attempt, "key_alias": key_alias, "action": "instant_failover"}
                             )
-                            time.sleep(1.0)
+                            if cls.sleep_interruptible(1.0, session_id):
+                                return {"success": False, "corrected_text": "", "model_used": "cancelled", "elapsed_seconds": 0.0, "error": "Processing cancelled by user"}
                             continue
                         else:
                             cooldown_left = key_pool.get_min_cooldown_remaining(api_key)
@@ -731,7 +748,12 @@ class AIService:
                                 page_number=page_number,
                                 details={"attempt": attempt, "wait_seconds": sleep_duration, "keys_tried": tried_aliases}
                             )
-                            key_pool.wait_for_any_key_ready(api_key, timeout=sleep_duration)
+                            wait_start = time.time()
+                            while time.time() - wait_start < sleep_duration:
+                                if cls.is_cancelled(session_id):
+                                    return {"success": False, "corrected_text": "", "model_used": "cancelled", "elapsed_seconds": 0.0, "tokens_used": 0, "error": "Processing cancelled by user"}
+                                if key_pool.wait_for_any_key_ready(api_key, timeout=min(1.0, sleep_duration)):
+                                    break
                             tried_keys.clear()
                     else:
                         is_503 = ("503" in last_error or "UNAVAILABLE" in last_error or "high demand" in last_error.lower())
@@ -745,7 +767,7 @@ class AIService:
                         )
                         if is_503:
                             if cls.is_cancelled(session_id):
-                                return {"success": False, "corrected_text": "", "model_used": "cancelled", "elapsed_seconds": 0.0, "error": "Processing cancelled by user"}
+                                return {"success": False, "corrected_text": "", "model_used": "cancelled", "elapsed_seconds": 0.0, "tokens_used": 0, "error": "Processing cancelled by user"}
                             cls.mark_model_cooldown(model_name, duration=90.0)
                             fallback_name = models[1] if len(models) > 1 else "fallback model"
                             log_manager.emit(
@@ -755,15 +777,15 @@ class AIService:
                                 model=model_name,
                                 page_number=page_number
                             )
-                            time.sleep(1.5)
+                            if cls.sleep_interruptible(1.5, session_id):
+                                return {"success": False, "corrected_text": "", "model_used": "cancelled", "elapsed_seconds": 0.0, "tokens_used": 0, "error": "Processing cancelled by user"}
                             break
                         if attempt < 4:
-                            if cls.is_cancelled(session_id):
-                                return {"success": False, "corrected_text": "", "model_used": "cancelled", "elapsed_seconds": 0.0, "error": "Processing cancelled by user"}
-                            time.sleep(1.0 * attempt)
+                            if cls.sleep_interruptible(1.0 * attempt, session_id):
+                                return {"success": False, "corrected_text": "", "model_used": "cancelled", "elapsed_seconds": 0.0, "tokens_used": 0, "error": "Processing cancelled by user"}
 
             if cls.is_cancelled(session_id):
-                return {"success": False, "corrected_text": "", "model_used": "cancelled", "elapsed_seconds": 0.0, "error": "Processing cancelled by user"}
+                return {"success": False, "corrected_text": "", "model_used": "cancelled", "elapsed_seconds": 0.0, "tokens_used": 0, "error": "Processing cancelled by user"}
 
             log_manager.emit(
                 level="WARN",

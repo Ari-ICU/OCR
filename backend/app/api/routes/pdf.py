@@ -1,6 +1,8 @@
 import json
 import asyncio
 import re
+import time
+import uuid
 import urllib.parse
 import httpx
 import logging
@@ -196,6 +198,9 @@ async def extract_correct_stream(request: Request):
         except Exception:
             pass
     
+    session_id = f"sess_{uuid.uuid4().hex[:8]}_{int(time.time()*1000)}"
+    AIService.set_active_session(session_id)
+
     async def event_generator():
         try:
             doc = PDFService.create_document_from_files_data(files_data)
@@ -230,7 +235,7 @@ async def extract_correct_stream(request: Request):
             # Close PyMuPDF document immediately to free memory and avoid thread locks
             doc.close()
 
-            yield f"event: init\ndata: {json.dumps({'filename': doc_title, 'total_pages': selected_pages_count, 'doc_total_pages': total_doc_pages, 'start_page': s_idx + 1, 'end_page': e_idx, 'mode': mode, 'provider': provider, 'model': model or settings.MODELS_TO_TRY[0], 'metadata': {'title': doc_title, 'author': 'Unknown'}, 'pages_overview': pages_overview})}\n\n"
+            yield f"event: init\ndata: {json.dumps({'filename': doc_title, 'total_pages': selected_pages_count, 'doc_total_pages': total_doc_pages, 'start_page': s_idx + 1, 'end_page': e_idx, 'mode': mode, 'provider': provider, 'model': model or settings.MODELS_TO_TRY[0], 'metadata': {'title': doc_title, 'author': 'Unknown'}, 'pages_overview': pages_overview, 'session_id': session_id})}\n\n"
             
             if selected_pages_count == 0:
                 yield f"event: done\ndata: {json.dumps({'total_pages': 0, 'full_text': ''})}\n\n"
@@ -248,8 +253,8 @@ async def extract_correct_stream(request: Request):
                 
                 try:
                     async with semaphore:
-                        # Abort immediately if client disconnected
-                        if await request.is_disconnected():
+                        # Abort immediately if session cancelled or client disconnected
+                        if AIService.is_cancelled(session_id) or await request.is_disconnected():
                             return
 
                         # Notify page start
@@ -315,7 +320,8 @@ async def extract_correct_stream(request: Request):
                                     provider=provider,
                                     api_key=api_key,
                                     preferred_model=model,
-                                    ollama_url=ollama_url or settings.DEFAULT_OLLAMA_URL
+                                    ollama_url=ollama_url or settings.DEFAULT_OLLAMA_URL,
+                                    session_id=session_id
                                 )
                                 # Graceful fallback: If Vision OCR failed but digital text exists, use raw text
                                 if not res.get("success") and raw_txt and not res.get("corrected_text"):
@@ -340,11 +346,12 @@ async def extract_correct_stream(request: Request):
                                         provider=provider,
                                         api_key=api_key,
                                         preferred_model=model,
-                                        ollama_url=ollama_url or settings.DEFAULT_OLLAMA_URL
+                                        ollama_url=ollama_url or settings.DEFAULT_OLLAMA_URL,
+                                        session_id=session_id
                                     )
 
                         # Check again after API call before putting to queue
-                        if await request.is_disconnected():
+                        if AIService.is_cancelled(session_id) or await request.is_disconnected() or res.get("model_used") == "cancelled":
                             return
 
                         all_corrected_dict[page_num] = res.get("corrected_text", "")
@@ -357,6 +364,8 @@ async def extract_correct_stream(request: Request):
                     # Clean cancellation, do not emit further events or errors
                     return
                 except Exception as ex:
+                    if AIService.is_cancelled(session_id) or await request.is_disconnected():
+                        return
                     logger.exception(f"Error processing page {page_num}: {ex}")
                     all_corrected_dict[page_num] = raw_txt or ""
                     await event_queue.put(
@@ -374,7 +383,7 @@ async def extract_correct_stream(request: Request):
                 # Stream events as workers finish
                 completed_count = 0
                 while completed_count < selected_pages_count:
-                    if await request.is_disconnected():
+                    if AIService.is_cancelled(session_id) or await request.is_disconnected():
                         for t in active_tasks:
                             if not t.done():
                                 t.cancel()
@@ -386,7 +395,7 @@ async def extract_correct_stream(request: Request):
                         if "event: page_done" in event_item:
                             completed_count += 1
                     except asyncio.TimeoutError:
-                        if await request.is_disconnected():
+                        if AIService.is_cancelled(session_id) or await request.is_disconnected():
                             for t in active_tasks:
                                 if not t.done():
                                     t.cancel()
@@ -405,6 +414,7 @@ async def extract_correct_stream(request: Request):
                 yield f"event: done\ndata: {json.dumps({'total_pages': selected_pages_count, 'full_text': full_text})}\n\n"
 
             finally:
+                AIService.cancel_session(session_id)
                 # CRITICAL: If client disconnects or aborts, cancel all remaining tasks immediately
                 for t in active_tasks:
                     if not t.done():

@@ -655,22 +655,28 @@ export default function Home() {
                 setStartPage(nextS);
                 setEndPage(nextE);
               }
-              // Save final session state
+              // Save final session state and ensure no pages are left in isProcessing
               setPages((currentPages) => {
-                persistActiveSession(selectedFile, currentPages, {
+                const cleaned = currentPages.map((p) => (p.isProcessing ? { ...p, isProcessing: false } : p));
+                persistActiveSession(selectedFile, cleaned, {
                   totalPdfDocPages,
-                  totalPages: currentPages.length,
+                  totalPages: cleaned.length,
                   startPage: nextS,
                   endPage: nextE,
                   processingMode,
                   concurrency,
                 });
-                return currentPages;
+                return cleaned;
               });
             } else if (eventType === "error") {
               setErrorMessage(data.message || "An error occurred during extraction.");
               setIsProcessing(false);
               setActiveWorkerPages([]);
+              setPages((prev) => {
+                const cleaned = prev.map((p) => (p.isProcessing ? { ...p, isProcessing: false } : p));
+                persistPagesOnly(cleaned);
+                return cleaned;
+              });
             }
           } catch (e) {
             console.error("SSE parse error", e, dataStr);
@@ -691,6 +697,11 @@ export default function Home() {
     } finally {
       setIsProcessing(false);
       setActiveWorkerPages([]);
+      setPages((prev) => {
+        const cleaned = prev.map((p) => (p.isProcessing ? { ...p, isProcessing: false } : p));
+        persistPagesOnly(cleaned);
+        return cleaned;
+      });
       abortControllerRef.current = null;
     }
   };
@@ -703,6 +714,11 @@ export default function Home() {
     fetch(`${API_BASE_URL}/api/cancel-all-processing`, { method: "POST" }).catch(() => {});
     setIsProcessing(false);
     setActiveWorkerPages([]);
+    setPages((prev) => {
+      const cleaned = prev.map((p) => (p.isProcessing ? { ...p, isProcessing: false } : p));
+      persistPagesOnly(cleaned);
+      return cleaned;
+    });
   };
 
 
