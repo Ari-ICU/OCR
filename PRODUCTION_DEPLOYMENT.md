@@ -161,6 +161,9 @@ curl http://localhost:8000/api/health
 
 # Key pool status
 curl http://localhost:8000/api/key-pool-status
+
+# Verify security module
+cd backend && python3 -c "from app.core.security import is_safe_url, validate_file_signature, sanitize_filename; print('Security module verified!')"
 ```
 You should see `{"status":"ok","active_models":...}`.
 
