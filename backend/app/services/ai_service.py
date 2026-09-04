@@ -150,6 +150,16 @@ class AIService:
         return False
 
     @classmethod
+    def sleep_interruptible(cls, seconds: float, session_id: Optional[str] = None) -> bool:
+        """Sleeps in small chunks (0.2s) while checking is_cancelled. Returns True if cancelled, False if finished."""
+        end = time.time() + seconds
+        while time.time() < end:
+            if cls.is_cancelled(session_id):
+                return True
+            time.sleep(min(0.2, max(0.01, end - time.time())))
+        return cls.is_cancelled(session_id)
+
+    @classmethod
     def mark_model_cooldown(cls, model_name: str, duration: float = 60.0):
         """Temporarily marks an overloaded model (503) on cooldown so other pages skip it."""
         with cls._model_lock:
@@ -268,6 +278,14 @@ class AIService:
                                 KHMER_VISION_PROMPT
                             ]
                         )
+                        if cls.is_cancelled(session_id):
+                            return {
+                                "success": False,
+                                "corrected_text": "",
+                                "model_used": "cancelled",
+                                "elapsed_seconds": 0.0,
+                                "error": "Processing cancelled by user"
+                            }
                         if response.text:
                             elapsed = round(time.time() - start_time, 2)
                             raw_resp = response.text.strip()
@@ -342,6 +360,14 @@ class AIService:
                     finally:
                         key_pool.release_key(current_key)
                 except Exception as e:
+                    if cls.is_cancelled(session_id):
+                        return {
+                            "success": False,
+                            "corrected_text": "",
+                            "model_used": "cancelled",
+                            "elapsed_seconds": 0.0,
+                            "error": "Processing cancelled by user"
+                        }
                     last_error = str(e)
                     is_invalid_key = (
                         ("401" in last_error or "UNAUTHENTICATED" in last_error or "ACCOUNT_STATE_INVALID" in last_error or "deleted or disabled" in last_error.lower())
@@ -389,7 +415,8 @@ class AIService:
                                 page_number=page_number,
                                 details={"attempt": attempt, "key_alias": key_alias, "action": "instant_failover"}
                             )
-                            time.sleep(1.0)
+                            if cls.sleep_interruptible(1.0, session_id):
+                                return {"success": False, "corrected_text": "", "model_used": "cancelled", "elapsed_seconds": 0.0, "error": "Processing cancelled by user"}
                             continue
                         else:
                             cooldown_left = key_pool.get_min_cooldown_remaining(api_key)
@@ -402,7 +429,12 @@ class AIService:
                                 page_number=page_number,
                                 details={"attempt": attempt, "wait_seconds": sleep_duration, "keys_tried": tried_aliases}
                             )
-                            key_pool.wait_for_any_key_ready(api_key, timeout=sleep_duration)
+                            wait_start = time.time()
+                            while time.time() - wait_start < sleep_duration:
+                                if cls.is_cancelled(session_id):
+                                    return {"success": False, "corrected_text": "", "model_used": "cancelled", "elapsed_seconds": 0.0, "error": "Processing cancelled by user"}
+                                if key_pool.wait_for_any_key_ready(api_key, timeout=min(1.0, sleep_duration)):
+                                    break
                             tried_keys.clear()
                     else:
                         is_503 = ("503" in last_error or "UNAVAILABLE" in last_error or "high demand" in last_error.lower())
@@ -415,6 +447,8 @@ class AIService:
                             details={"attempt": attempt, "error": last_error, "key_alias": key_alias}
                         )
                         if is_503:
+                            if cls.is_cancelled(session_id):
+                                return {"success": False, "corrected_text": "", "model_used": "cancelled", "elapsed_seconds": 0.0, "error": "Processing cancelled by user"}
                             # 503 is a server-side capacity issue with this specific model; mark cooldown & switch model immediately to save keys
                             cls.mark_model_cooldown(model_name, duration=90.0)
                             fallback_name = models[1] if len(models) > 1 else "fallback model"
@@ -425,10 +459,21 @@ class AIService:
                                 model=model_name,
                                 page_number=page_number
                             )
-                            time.sleep(1.5)  # Backoff before switching model
+                            if cls.sleep_interruptible(1.5, session_id):
+                                return {"success": False, "corrected_text": "", "model_used": "cancelled", "elapsed_seconds": 0.0, "error": "Processing cancelled by user"}
                             break
                         if attempt < 4:
-                            time.sleep(1.0 * attempt)
+                            if cls.sleep_interruptible(1.0 * attempt, session_id):
+                                return {"success": False, "corrected_text": "", "model_used": "cancelled", "elapsed_seconds": 0.0, "error": "Processing cancelled by user"}
+
+            if cls.is_cancelled(session_id):
+                return {
+                    "success": False,
+                    "corrected_text": "",
+                    "model_used": "cancelled",
+                    "elapsed_seconds": 0.0,
+                    "error": "Processing cancelled by user"
+                }
 
             log_manager.emit(
                 level="WARN",
@@ -463,12 +508,23 @@ class AIService:
         raw_text: str,
         page_number: int,
         api_key: Optional[str] = None,
-        preferred_model: Optional[str] = None
+        preferred_model: Optional[str] = None,
+        session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Corrects raw digital Khmer text using Gemini API
         with multi-key pool rotation, live logging & instant 429 auto-failover.
         """
+        if cls.is_cancelled(session_id):
+            return {
+                "success": False,
+                "corrected_text": "",
+                "model_used": "cancelled",
+                "elapsed_seconds": 0.0,
+                "tokens_used": 0,
+                "error": "Processing cancelled by user"
+            }
+
         if not raw_text.strip():
             return {
                 "success": True,
@@ -518,6 +574,16 @@ class AIService:
         max_attempts = max(8, len(candidate_keys) + 1) if candidate_keys else 8
         for model_name in models:
             for attempt in range(1, max_attempts + 1):
+                if cls.is_cancelled(session_id):
+                    return {
+                        "success": False,
+                        "corrected_text": "",
+                        "model_used": "cancelled",
+                        "elapsed_seconds": 0.0,
+                        "tokens_used": 0,
+                        "error": "Processing cancelled by user"
+                    }
+
                 current_key, key_alias, pool_size = key_pool.get_next_key(user_keys_raw=api_key, exclude_keys=tried_keys)
                 last_alias = key_alias
                 if key_alias not in tried_aliases:
