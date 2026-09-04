@@ -938,12 +938,12 @@ export default function Home() {
             <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white leading-tight">
               {processingMode === "vision"
                 ? "Convert Khmer PDFs to Clean Text & LaTeX"
-                : "Fast Digital Khmer PDF Text Extractor"}
+                : "Fast Digital Khmer PDF & Webpage Text Extractor"}
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 font-khmer max-w-2xl mx-auto leading-relaxed">
               {processingMode === "vision"
                 ? "បំប្លែងឯកសារ PDF ភាសាខ្មែរ ទៅជាអត្ថបទស្អាត ត្រឹមត្រូវតាមស្ដង់ដារយូនីកូដ (Consonant + Subscript ជើង + Vowel + Signs) ព្រមទាំងរក្សារូបមន្តគណិតវិទ្យា/រូបវិទ្យាជាទម្រង់ LaTeX 100%"
-                : "ស្រង់អត្ថបទយូនីកូដខ្មែរដោយផ្ទាល់ពី Digital PDF ក្នុងល្បឿនលឿនបំផុត (Fast Native Extraction) ដោយមិនបាច់រង់ចាំ AI VLM"}
+                : "ស្រង់អត្ថបទយូនីកូដខ្មែរដោយផ្ទាល់ពី Digital PDF ឬតំណភ្ជាប់ Webpage HTML ក្នុងល្បឿនលឿនបំផុត (Fast Native Extraction) ដោយមិនបាច់រង់ចាំ AI VLM"}
             </p>
           </div>
 

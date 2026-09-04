@@ -225,11 +225,29 @@ export const FileUpload: React.FC<FileUploadProps> = ({
         throw new Error(errorJson?.detail || `Failed to download file from link (HTTP ${res.status})`);
       }
 
+      const isWebpage = (res.headers.get("x-is-webpage") || "").toLowerCase() === "true";
+      if (isWebpage && processingMode === "vision") {
+        throw new Error(
+          "តំណភ្ជាប់ Webpage HTML គាំទ្រតែនៅក្នុង Digital Text (#text) ប៉ុណ្ណោះ។ សូមចុចលើ Digital Text ដើម្បី Crawl អត្ថបទនេះ។ (Webpage HTML articles are only supported in #text)"
+        );
+      }
+
       const blob = await res.blob();
-      const filename =
-        res.headers.get("X-Filename") ||
-        res.headers.get("x-filename") ||
-        "imported_document.pdf";
+      const rawDisplayName = res.headers.get("X-Display-Name") || res.headers.get("x-display-name");
+      let filename = "";
+      if (rawDisplayName) {
+        try {
+          filename = decodeURIComponent(rawDisplayName);
+        } catch {
+          filename = rawDisplayName;
+        }
+      }
+      if (!filename) {
+        filename =
+          res.headers.get("X-Filename") ||
+          res.headers.get("x-filename") ||
+          "imported_document.pdf";
+      }
 
       const downloadedFile = new File([blob], filename, {
         type: blob.type || "application/pdf",
@@ -275,38 +293,40 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     <div className="w-full space-y-4">
       {activeFileList.length === 0 ? (
         <div className="space-y-3">
-          {/* Toggle between Local Upload & Link Import */}
-          <div className="flex items-center justify-center">
-            <div className="inline-flex p-1 rounded-2xl bg-[#0D1322] border border-slate-800 shadow-lg">
-              <button
-                type="button"
-                onClick={() => { setActiveTab("file"); setError(null); }}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
-                  activeTab === "file"
-                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <FileUp className="h-4 w-4" />
-                <span>Local Files (PDF / Images)</span>
-              </button>
+          {/* Toggle between Local Upload & Link Import (Only shown in Vision OCR mode) */}
+          {processingMode !== "text" && (
+            <div className="flex items-center justify-center">
+              <div className="inline-flex p-1 rounded-2xl bg-[#0D1322] border border-slate-800 shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => { setActiveTab("file"); setError(null); }}
+                  className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+                    activeTab === "file"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <FileUp className="h-4 w-4" />
+                  <span>Local Files (PDF / Images)</span>
+                </button>
 
-              <button
-                type="button"
-                onClick={() => { setActiveTab("url"); setError(null); }}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
-                  activeTab === "url"
-                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <LinkIcon className="h-4 w-4" />
-                <span>Import via Link / URL</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => { setActiveTab("url"); setError(null); }}
+                  className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+                    activeTab === "url"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                      : "text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <LinkIcon className="h-4 w-4" />
+                  <span>Import via Link / URL</span>
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
-          {activeTab === "file" ? (
+          {processingMode !== "text" && activeTab === "file" ? (
             <div
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
@@ -354,10 +374,14 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                   <Globe className="h-6 w-6" />
                 </div>
                 <h3 className="text-sm sm:text-base font-bold text-white">
-                  Import PDF or Image from Link
+                  {processingMode === "text"
+                    ? "Paste Webpage Link to Crawl Khmer HTML Text"
+                    : "Import PDF, Image, or Webpage from Link"}
                 </h3>
-                <p className="text-xs text-slate-400 max-w-md mx-auto font-khmer">
-                  បញ្ចូលតំណភ្ជាប់ (Google Drive, Dropbox ឬ Direct Link) នៃឯកសារ PDF ឬរូបភាពដើម្បីទាញយកដោយស្វ័យប្រវត្តិ
+                <p className="text-xs text-slate-400 max-w-lg mx-auto font-khmer">
+                  {processingMode === "text"
+                    ? "បិទភ្ជាប់តំណភ្ជាប់ Webpage (អត្ថបទព័ត៌មាន HTML, សេចក្តីប្រកាស), PDF, Google Drive ឬ Dropbox ដើម្បីស្រង់អត្ថបទយូនីកូដខ្មែរស្អាត ១០០%"
+                    : "បញ្ចូលតំណភ្ជាប់ Webpage (HTML), Google Drive, Dropbox ឬ Direct Link នៃឯកសារ PDF ឬរូបភាពដើម្បីទាញយកដោយស្វ័យប្រវត្តិ"}
                 </p>
               </div>
 
@@ -370,7 +394,11 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                     type="url"
                     value={urlInput}
                     onChange={(e) => setUrlInput(e.target.value)}
-                    placeholder="https://drive.google.com/... or https://example.com/document.pdf"
+                    placeholder={
+                      processingMode === "text"
+                        ? "https://... (Webpage Link, News Article HTML, PDF, Google Drive)"
+                        : "https://drive.google.com/... or https://example.com/document.pdf"
+                    }
                     disabled={isFetchingUrl}
                     className="w-full bg-[#070A12] border border-slate-700 rounded-2xl pl-11 pr-32 py-3 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-inner"
                   />
@@ -394,11 +422,52 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                 </div>
 
                 <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] text-slate-500 pt-1">
-                  <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">🌐 Direct PDF / Image URL</span>
+                  {processingMode === "text" ? (
+                    <>
+                      <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-indigo-400 font-medium">
+                        📰 Webpage HTML (News/Articles)
+                      </span>
+                      <span>•</span>
+                      <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">
+                        📄 Direct PDF Link
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">
+                        📄 Direct PDF URL
+                      </span>
+                      <span>•</span>
+                      <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">
+                        🖼️ Image Link (PNG, JPG)
+                      </span>
+                    </>
+                  )}
                   <span>•</span>
-                  <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">📁 Google Drive Share Links</span>
-                  <span>•</span>
-                  <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">📦 Dropbox Links</span>
+                  <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">
+                    📁 Google Drive / Dropbox
+                  </span>
+                </div>
+
+                {/* Quick 1-Click Samples for Testing */}
+                <div className="flex flex-wrap items-center justify-center gap-2 pt-1 text-xs">
+                  <span className="text-[11px] text-slate-500 font-medium">Quick Test:</span>
+                  {processingMode === "text" && (
+                    <button
+                      type="button"
+                      onClick={() => setUrlInput("https://www.kampucheathmey.com/sports/1178993")}
+                      className="px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 text-[11px] transition-colors"
+                    >
+                      📰 Khmer News Article
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setUrlInput("https://mosvy.gov.kh/wp-content/uploads/2021/11/02-Prakas-on-CTP-PF-Implementation.pdf")}
+                    className="px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 text-[11px] transition-colors"
+                  >
+                    📜 MoSVY PDF Prakas
+                  </button>
                 </div>
               </form>
             </div>

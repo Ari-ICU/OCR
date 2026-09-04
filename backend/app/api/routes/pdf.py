@@ -648,24 +648,30 @@ async def fetch_url_endpoint(request: Request):
                 safe_slug = re.sub(r'[\s/\\?%*:|"<>]+', '_', web_title)[:45].strip('_')
                 if not safe_slug:
                     safe_slug = "webpage_article"
-                filename = f"{safe_slug}.pdf"
+                
+                # ASCII-safe fallback filename for HTTP headers
+                ascii_slug = re.sub(r'[^a-zA-Z0-9_\-\.]', '', safe_slug)[:30].strip('_')
+                if not ascii_slug:
+                    ascii_slug = "webpage_document"
+                ascii_filename = f"{ascii_slug}.pdf"
+                encoded_fn = urllib.parse.quote(f"{safe_slug}.pdf")
                 
                 has_khmer_content = (khmer_chars > 0)
                 doc_lang = "khmer" if has_khmer_content else "english"
-                encoded_fn = urllib.parse.quote(filename)
                 
                 return Response(
                     content=pdf_bytes,
                     media_type="application/pdf",
                     headers={
-                        "Content-Disposition": f"inline; filename*=UTF-8''{encoded_fn}",
-                        "X-Filename": filename,
+                        "Content-Disposition": f"inline; filename=\"{ascii_filename}\"; filename*=UTF-8''{encoded_fn}",
+                        "X-Filename": ascii_filename,
+                        "X-Display-Name": encoded_fn,
                         "X-Is-Webpage": "true",
                         "X-Webpage-Title": urllib.parse.quote(web_title),
                         "X-Khmer-Count": str(khmer_chars),
                         "X-Detected-Language": doc_lang,
                         "X-Has-Khmer": "true" if has_khmer_content else "false",
-                        "Access-Control-Expose-Headers": "X-Filename, Content-Disposition, X-Detected-Language, X-Has-Khmer, X-Is-Webpage, X-Webpage-Title, X-Khmer-Count"
+                        "Access-Control-Expose-Headers": "X-Filename, X-Display-Name, Content-Disposition, X-Detected-Language, X-Has-Khmer, X-Is-Webpage, X-Webpage-Title, X-Khmer-Count"
                     }
                 )
 
