@@ -1,3 +1,4 @@
+import os
 import json
 import asyncio
 import re
@@ -5,6 +6,7 @@ import html as html_lib
 import urllib.parse
 import httpx
 import logging
+import bs4
 from typing import Optional, Dict, List, Tuple, Any
 from fastapi import APIRouter, Request, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse, Response
@@ -426,10 +428,152 @@ def detect_pdf_language(title: str, filename: str, url: str) -> Tuple[str, bool]
     return "khmer", True
 
 
+def extract_clean_html_article(html_content: str, url: str = "") -> Tuple[str, str, int]:
+    """
+    Extracts clean article title and body text paragraphs from raw HTML webpage content.
+    Removes boilerplate navigation, headers, footers, sidebars, scripts, ads, and social sharing widgets.
+    """
+    soup = bs4.BeautifulSoup(html_content, "html.parser")
+
+    # 1. Extract title
+    title = ""
+    og_title = soup.find("meta", property="og:title") or soup.find("meta", attrs={"name": "twitter:title"})
+    if og_title and og_title.get("content"):
+        title = og_title["content"].strip()
+    if not title:
+        h1 = soup.find("h1")
+        if h1:
+            title = h1.get_text().strip()
+    if not title:
+        t_tag = soup.find("title")
+        if t_tag:
+            title = t_tag.get_text().strip()
+    title = re.sub(r"\s+", " ", title or "Webpage Document").strip()
+
+    # 2. Decompose clutter elements
+    for el in soup(["script", "style", "nav", "header", "footer", "aside", "noscript", "iframe", "form", "button", "svg"]):
+        el.decompose()
+
+    # 3. Locate main content container
+    content_container = (
+        soup.find("article") or 
+        soup.find("main") or 
+        soup.find(attrs={"role": "main"}) or 
+        soup.find(class_=re.compile(r"(entry-content|post-content|article-content|news-content|detail-content|content-body)", re.I)) or
+        soup.find("body")
+    )
+    if not content_container:
+        content_container = soup
+
+    # 4. Extract paragraphs & headings
+    blocks = []
+    social_keywords = {"share", "tweet", "facebook", "telegram", "whatsapp", "pinterest", "print", "email", "subscribe"}
+    
+    for tag in content_container.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "blockquote", "li"]):
+        txt = tag.get_text().strip()
+        if not txt or len(txt) < 2:
+            continue
+        txt_lower = txt.lower()
+        # Skip social sharing buttons & copyrights
+        if txt_lower in social_keywords or (len(txt) < 25 and any(s in txt_lower for s in social_keywords)):
+            continue
+        if any(j in txt_lower for j in ["copyright ©", "all rights reserved", "terms of service", "cookie policy"]):
+            continue
+        if tag.name.startswith("h"):
+            blocks.append(f"\n【 {txt} 】\n")
+        elif tag.name == "li":
+            blocks.append(f"• {txt}")
+        else:
+            blocks.append(txt)
+
+    full_text = "\n\n".join(blocks)
+    full_text = re.sub(r"\n{3,}", "\n\n", full_text).strip()
+    
+    khmer_count = len(re.findall(r"[\u1780-\u17D3]", full_text))
+    return title, full_text, khmer_count
+
+
+def chunk_text_into_pages(text: str, max_chars_per_page: int = 1200) -> List[str]:
+    """Splits long article text into readable document pages without cutting sentences abruptly."""
+    raw_paras = [p.strip() for p in text.split("\n") if p.strip()]
+    if not raw_paras:
+        return ["[No readable text content found on webpage]"]
+        
+    normalized_paras = []
+    for p in raw_paras:
+        if len(p) <= max_chars_per_page:
+            normalized_paras.append(p)
+        else:
+            # Sub-split long paragraph on Khmer full stop ។ or latin punctuation
+            sub_sentences = re.split(r"(?<=[។\.!\?])\s*", p)
+            current_sub = ""
+            for s in sub_sentences:
+                if len(current_sub) + len(s) > max_chars_per_page and current_sub:
+                    normalized_paras.append(current_sub.strip())
+                    current_sub = s
+                else:
+                    current_sub += (" " if current_sub else "") + s
+            if current_sub:
+                normalized_paras.append(current_sub.strip())
+
+    pages = []
+    current_page = []
+    current_chars = 0
+    for p in normalized_paras:
+        if current_chars + len(p) > max_chars_per_page and current_page:
+            pages.append("\n\n".join(current_page))
+            current_page = [p]
+            current_chars = len(p)
+        else:
+            current_page.append(p)
+            current_chars += len(p)
+    if current_page:
+        pages.append("\n\n".join(current_page))
+    return pages
+
+
+def build_pdf_from_html_text(title: str, text: str, source_url: str = "") -> bytes:
+    """
+    Constructs a pristine digital PDF document with embedded Khmer font and clean text layer.
+    Each page is formatted with an aesthetic header accent and structured paragraphs.
+    """
+    khmer_font_candidates = [
+        "/System/Library/Fonts/Supplemental/Khmer Sangam MN.ttf",
+        "/System/Library/Fonts/Supplemental/Khmer MN.ttc",
+        "/Library/Fonts/KhmerOS.ttf",
+        "/Library/Fonts/KhmerOS_sys.ttf",
+        "/usr/share/fonts/truetype/khmeros/KhmerOS.ttf"
+    ]
+    font_path = next((p for p in khmer_font_candidates if os.path.exists(p)), None)
+    
+    pages_text = chunk_text_into_pages(text, max_chars_per_page=1200)
+    
+    doc = fitz.open()
+    for p_idx, page_body in enumerate(pages_text):
+        page = doc.new_page(width=595, height=842) # A4 format
+        if font_path:
+            page.insert_font(fontname="khmer", fontfile=font_path)
+            
+        # Draw aesthetic top accent bar
+        page.draw_rect(fitz.Rect(40, 30, 555, 33), color=(0.2, 0.4, 0.8), fill=(0.2, 0.4, 0.8))
+        
+        # Insert body text inside printable rect
+        rect = fitz.Rect(50, 50, 545, 800)
+        if font_path:
+            page.insert_textbox(rect, page_body, fontname="khmer", fontsize=11)
+        else:
+            page.insert_textbox(rect, page_body, fontname="helv", fontsize=11)
+            
+    pdf_bytes = doc.tobytes()
+    doc.close()
+    return pdf_bytes
+
+
 @router.post("/fetch-url")
 async def fetch_url_endpoint(request: Request):
     """
-    Downloads a remote PDF or image file from a public URL or cloud share link (e.g. Google Drive, Dropbox).
+    Downloads a remote PDF or image file from a public URL or cloud share link (e.g. Google Drive, Dropbox),
+    or crawls an HTML webpage article (Khmer news, government announcements) and converts it to a clean digital PDF.
     Returns the binary content with appropriate filename headers.
     """
     target_url = None
@@ -444,7 +588,7 @@ async def fetch_url_endpoint(request: Request):
         target_url = form.get("url")
 
     if not target_url or not str(target_url).strip():
-        raise HTTPException(status_code=400, detail="Please enter a valid PDF or image link (URL).")
+        raise HTTPException(status_code=400, detail="Please enter a valid link (URL).")
 
     clean_url = transform_cloud_url(str(target_url).strip())
 
@@ -478,11 +622,55 @@ async def fetch_url_endpoint(request: Request):
             if resp.status_code != 200:
                 raise HTTPException(status_code=400, detail=f"Failed to download file from link (HTTP {resp.status_code}). Please make sure the link is publicly accessible.")
             
-            content = resp.content
-            if not content or len(content) == 0:
+            raw_content = resp.content
+            if not raw_content or len(raw_content) == 0:
                 raise HTTPException(status_code=400, detail="The provided link returned an empty file.")
 
-            # Extract filename from Content-Disposition header or URL path
+            ctype = resp.headers.get("content-type", "").lower()
+            is_html = (
+                "text/html" in ctype
+                or raw_content[:400].lower().startswith(b"<!doctype html")
+                or raw_content[:400].lower().startswith(b"<html")
+                or b"<head" in raw_content[:1200].lower()
+            ) and not raw_content.startswith(b"%PDF")
+
+            # Handle HTML Webpage Crawling: Extract clean Khmer Unicode article and package into digital PDF
+            if is_html:
+                decoded_html = raw_content.decode("utf-8", errors="replace")
+                web_title, clean_text, khmer_chars = extract_clean_html_article(decoded_html, clean_url)
+                if not clean_text or len(clean_text.strip()) == 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Could not extract readable article text from the provided webpage link. Please check if the site requires a login or has anti-scraping protection."
+                    )
+                
+                pdf_bytes = build_pdf_from_html_text(web_title, clean_text, clean_url)
+                safe_slug = re.sub(r'[\s/\\?%*:|"<>]+', '_', web_title)[:45].strip('_')
+                if not safe_slug:
+                    safe_slug = "webpage_article"
+                filename = f"{safe_slug}.pdf"
+                
+                has_khmer_content = (khmer_chars > 0)
+                doc_lang = "khmer" if has_khmer_content else "english"
+                encoded_fn = urllib.parse.quote(filename)
+                
+                return Response(
+                    content=pdf_bytes,
+                    media_type="application/pdf",
+                    headers={
+                        "Content-Disposition": f"inline; filename*=UTF-8''{encoded_fn}",
+                        "X-Filename": filename,
+                        "X-Is-Webpage": "true",
+                        "X-Webpage-Title": urllib.parse.quote(web_title),
+                        "X-Khmer-Count": str(khmer_chars),
+                        "X-Detected-Language": doc_lang,
+                        "X-Has-Khmer": "true" if has_khmer_content else "false",
+                        "Access-Control-Expose-Headers": "X-Filename, Content-Disposition, X-Detected-Language, X-Has-Khmer, X-Is-Webpage, X-Webpage-Title, X-Khmer-Count"
+                    }
+                )
+
+            # Standard PDF / Image Download Handling
+            content = raw_content
             cd = resp.headers.get("content-disposition", "")
             filename = None
             if "filename=" in cd:
@@ -496,7 +684,6 @@ async def fetch_url_endpoint(request: Request):
                 if base and any(base.lower().endswith(ext) for ext in SUPPORTED_EXTENSIONS):
                     filename = base
 
-            ctype = resp.headers.get("content-type", "").lower()
             if not filename:
                 if "pdf" in ctype or content.startswith(b"%PDF"):
                     filename = "imported_document.pdf"
@@ -556,8 +743,60 @@ async def fetch_url_endpoint(request: Request):
 
     except httpx.RequestError as e:
         raise HTTPException(status_code=400, detail=f"Network connection failed when downloading link: {str(e)}")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error importing from link: {str(e)}")
+
+
+@router.post("/crawl-html-text")
+async def crawl_html_text_endpoint(request: Request):
+    """
+    Crawls an HTML webpage link and returns structured Khmer Unicode paragraphs and pages as JSON.
+    Directly usable by Digital Text mode or external scrapers.
+    """
+    data = await request.json()
+    url = data.get("url", "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="Missing required 'url' parameter.")
+        
+    async with httpx.AsyncClient(
+        follow_redirects=True,
+        timeout=30.0,
+        verify=False,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "km,en-US;q=0.9,en;q=0.8"
+        }
+    ) as client:
+        resp = await client.get(url)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=400, detail=f"Failed to fetch webpage (HTTP {resp.status_code})")
+            
+        web_title, clean_text, khmer_chars = extract_clean_html_article(resp.text, url)
+        if not clean_text:
+            raise HTTPException(status_code=400, detail="Could not extract readable article text from the webpage.")
+            
+        pages = chunk_text_into_pages(clean_text, max_chars_per_page=1200)
+        pages_data = [
+            {
+                "page_number": idx + 1,
+                "raw_text": p_text,
+                "char_count": len(p_text),
+                "word_count": len(p_text.split())
+            }
+            for idx, p_text in enumerate(pages)
+        ]
+        
+        return {
+            "success": True,
+            "title": web_title,
+            "url": url,
+            "khmer_char_count": khmer_chars,
+            "total_pages": len(pages_data),
+            "pages": pages_data
+        }
 
 
 @router.api_route("/view-pdf", methods=["GET", "HEAD"])
