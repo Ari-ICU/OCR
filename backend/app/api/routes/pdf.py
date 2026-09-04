@@ -446,7 +446,22 @@ async def fetch_url_endpoint(request: Request):
         raise HTTPException(status_code=400, detail="Please enter a valid PDF or image link (URL).")
 
     clean_url = transform_cloud_url(str(target_url).strip())
-    
+
+    # Special resolver for interior.gov.kh library detail link
+    interior_hash_match = re.search(r'interior\.gov\.kh/(?:(?:kh|en)/)?library/detail/([a-zA-Z0-9_-]+)', clean_url)
+    if interior_hash_match:
+        doc_hash = interior_hash_match.group(1)
+        try:
+            with httpx.Client(verify=False, timeout=10.0) as temp_client:
+                api_res = temp_client.get(f"https://web-api.interior.gov.kh/api/v1/public/document/{doc_hash}")
+                if api_res.status_code == 200:
+                    api_json = api_res.json()
+                    direct_file = api_json.get("data", {}).get("file_url")
+                    if direct_file:
+                        clean_url = direct_file
+        except Exception:
+            pass
+
     try:
         async with httpx.AsyncClient(
             follow_redirects=True,
@@ -544,6 +559,64 @@ async def fetch_url_endpoint(request: Request):
         raise HTTPException(status_code=400, detail=f"Error importing from link: {str(e)}")
 
 
+@router.api_route("/view-pdf", methods=["GET", "HEAD"])
+async def view_pdf_endpoint(url: str = Query(...)):
+    """
+    Proxies a remote PDF link directly to browser with `Content-Type: application/pdf`
+    and `Content-Disposition: inline`. This ensures modern browsers render the PDF inside
+    their built-in viewer tab instead of downloading it to disk.
+    """
+    if not url or not url.strip():
+        raise HTTPException(status_code=400, detail="Missing url parameter")
+    clean_url = transform_cloud_url(url.strip())
+    
+    # Resolve interior.gov.kh library detail link if needed
+    interior_hash_match = re.search(r'interior\.gov\.kh/(?:(?:kh|en)/)?library/detail/([a-zA-Z0-9_-]+)', clean_url)
+    if interior_hash_match:
+        doc_hash = interior_hash_match.group(1)
+        try:
+            with httpx.Client(verify=False, timeout=10.0) as temp_client:
+                api_res = temp_client.get(f"https://web-api.interior.gov.kh/api/v1/public/document/{doc_hash}")
+                if api_res.status_code == 200:
+                    api_json = api_res.json()
+                    direct_file = api_json.get("data", {}).get("file_url")
+                    if direct_file:
+                        clean_url = direct_file
+        except Exception:
+            pass
+
+    try:
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=45.0,
+            verify=False,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "*/*"
+            }
+        ) as client:
+            resp = await client.get(clean_url)
+            if resp.status_code != 200:
+                raise HTTPException(status_code=400, detail=f"Failed to fetch PDF (HTTP {resp.status_code})")
+            
+            parsed_path = urllib.parse.urlparse(clean_url).path
+            filename = parsed_path.split("/")[-1].strip() or "document.pdf"
+            if not filename.lower().endswith(".pdf"):
+                filename += ".pdf"
+            
+            return Response(
+                content=resp.content,
+                media_type="application/pdf",
+                headers={
+                    "Content-Type": "application/pdf",
+                    "Content-Disposition": f'inline; filename="{filename}"',
+                    "Cache-Control": "public, max-age=3600"
+                }
+            )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error previewing PDF: {str(e)}")
+
+
 @router.post("/crawl-webpage")
 async def crawl_webpage_endpoint(request: Request):
     """
@@ -581,17 +654,34 @@ async def crawl_webpage_endpoint(request: Request):
     seen_pdf_urls = set()
     page_title = clean_url
 
-    async with httpx.AsyncClient(headers=headers, follow_redirects=True, timeout=8.0, verify=False) as client:
-        # Simultaneously fetch main webpage and CMS / WordPress Media API for maximum speed
+    async with httpx.AsyncClient(headers=headers, follow_redirects=True, timeout=10.0, verify=False) as client:
+        # Check if target is Ministry of Interior (interior.gov.kh)
+        is_interior_gov = "interior.gov.kh" in origin or "interior.gov.kh" in clean_url
+        interior_tasks = []
+        if is_interior_gov:
+            page_title = "បណ្ណាល័យឌីជីថល ក្រសួងមហាផ្ទៃ (Ministry of Interior Digital Library)"
+            detail_hash = re.search(r'library/detail/([a-zA-Z0-9_-]+)', clean_url)
+            if detail_hash:
+                interior_tasks = [
+                    client.get(f"https://web-api.interior.gov.kh/api/v1/public/document/{detail_hash.group(1)}")
+                ]
+            else:
+                interior_tasks = [
+                    client.get("https://web-api.interior.gov.kh/api/v1/public/document?page=1&per_page=30"),
+                    client.get("https://web-api.interior.gov.kh/api/v1/public/document?page=2&per_page=30")
+                ]
+
+        # Simultaneously fetch main webpage, CMS / WordPress Media API, and interior API
         wp_media_url = f"{origin}/wp-json/wp/v2/media?mime_type=application/pdf&per_page=50"
         tasks = [
             client.get(clean_url),
             client.get(wp_media_url)
-        ]
+        ] + interior_tasks
         resps = await asyncio.gather(*tasks, return_exceptions=True)
 
         main_resp = resps[0] if len(resps) > 0 and not isinstance(resps[0], Exception) and resps[0].status_code == 200 else None
         wp_resp = resps[1] if len(resps) > 1 and not isinstance(resps[1], Exception) and resps[1].status_code == 200 else None
+        interior_resps = resps[2:] if is_interior_gov else []
 
         # 1. Process main page HTML for direct PDF links & document cards
         detail_links = []
@@ -649,7 +739,48 @@ async def crawl_webpage_endpoint(request: Request):
             except Exception:
                 pass
 
-        # 3. If fewer than 5 PDFs found, quickly inspect up to 5 document subpages
+        # 3. Process Ministry of Interior (interior.gov.kh) API results
+        if is_interior_gov and interior_resps:
+            for i_resp in interior_resps:
+                if i_resp and not isinstance(i_resp, Exception) and getattr(i_resp, "status_code", 0) == 200:
+                    try:
+                        i_data = i_resp.json()
+                        raw_data = i_data.get("data", {})
+                        items = []
+                        if isinstance(raw_data, dict):
+                            if "data_item" in raw_data and isinstance(raw_data["data_item"], list):
+                                items = raw_data["data_item"]
+                            elif raw_data.get("file_url"):
+                                items = [raw_data]
+                        for it in items:
+                            f_url = it.get("file_url")
+                            if f_url and f_url not in seen_pdf_urls:
+                                t = it.get("title") or it.get("name") or "ឯកសារក្រសួងមហាផ្ទៃ"
+                                fn = urllib.parse.unquote(f_url.split("/")[-1].split("?")[0])
+                                pdfs.append({
+                                    "title": t,
+                                    "url": f_url,
+                                    "filename": fn
+                                })
+                                seen_pdf_urls.add(f_url)
+                    except Exception:
+                        pass
+
+        # 4. Also scan HTML for any embedded full PDF URLs (e.g. web-storage or direct pdf links)
+        if main_resp:
+            embedded_pdfs = re.findall(r'https?://[^\s"\'<>]+\.pdf', main_resp.text, re.IGNORECASE)
+            for ep in embedded_pdfs:
+                clean_ep = ep.strip().rstrip(".)\",'")
+                if clean_ep not in seen_pdf_urls:
+                    fn = urllib.parse.unquote(clean_ep.split("/")[-1].split("?")[0])
+                    pdfs.append({
+                        "title": fn,
+                        "url": clean_ep,
+                        "filename": fn
+                    })
+                    seen_pdf_urls.add(clean_ep)
+
+        # 5. If fewer than 5 PDFs found, quickly inspect up to 5 document subpages
         if len(pdfs) < 5 and detail_links:
             async def fetch_subpage(item):
                 try:

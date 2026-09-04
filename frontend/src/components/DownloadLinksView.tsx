@@ -568,6 +568,13 @@ export const DownloadLinksView: React.FC<DownloadLinksViewProps> = ({
               <span className="text-slate-500 font-medium">សាកល្បង៖</span>
               <button
                 type="button"
+                onClick={() => setWebpageUrl("https://www.interior.gov.kh/library")}
+                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 font-mono text-[11px] border border-slate-700/60 transition-colors"
+              >
+                MOI: ក្រសួងមហាផ្ទៃ (Digital Library)
+              </button>
+              <button
+                type="button"
                 onClick={() => setWebpageUrl("https://mosvy.gov.kh/%e1%9e%85%e1%9f%92%e1%9e%94%e1%9e%b6%e1%9e%94%e1%9f%8b-%e1%9e%93%e1%9e%b7%e1%9e%84%e1%9e%94%e1%9e%92%e1%9e%94%e1%9e%89%e1%9f%92%e1%9e%89%e1%9e%8f%e1%9f%92%e1%9e%8f%e1%9e%b7.")}
                 className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-indigo-300 font-mono text-[11px] border border-slate-700/60 transition-colors"
               >
@@ -749,12 +756,12 @@ export const DownloadLinksView: React.FC<DownloadLinksViewProps> = ({
                         </div>
 
                         <a
-                          href={pdf.url}
+                          href={`${API_BASE_URL}/api/view-pdf?url=${encodeURIComponent(pdf.url)}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
                           className="p-1.5 rounded text-slate-500 hover:text-indigo-300 hover:bg-slate-800 transition shrink-0 ml-2"
-                          title="Open PDF URL in new tab"
+                          title="បើកមើល PDF ក្នុងផ្ទាំងថ្មី (View PDF in new tab)"
                         >
                           <ExternalLink className="h-3.5 w-3.5" />
                         </a>
@@ -1105,7 +1112,18 @@ export const DownloadLinksView: React.FC<DownloadLinksViewProps> = ({
               បញ្ចូលតំណភ្ជាប់គេហទំព័រមួយដែលមានឯកសារជាច្រើន (ដូចជាគេហទំព័រក្រសួង ឬស្ថាប័នរដ្ឋ)។ ប្រព័ន្ធនឹងស្កេនស្រង់យក និងជ្រើសរើសស្វ័យប្រវត្តិតែឯកសារខ្មែរ ដោយរំលងឯកសារអង់គ្លេស។
             </p>
           </div>
-          <div className="pt-2 flex items-center justify-center space-x-3">
+          <div className="pt-2 flex items-center justify-center flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveMode("webpage");
+                setWebpageUrl("https://www.interior.gov.kh/library");
+              }}
+              className="text-xs text-emerald-400 hover:text-emerald-300 underline underline-offset-4 font-khmer"
+            >
+              សាកល្បងជាមួយបណ្ណាល័យក្រសួងមហាផ្ទៃ (MOI Library)
+            </button>
+            <span className="text-slate-600">•</span>
             <button
               type="button"
               onClick={() => {
@@ -1114,7 +1132,7 @@ export const DownloadLinksView: React.FC<DownloadLinksViewProps> = ({
               }}
               className="text-xs text-indigo-400 hover:text-indigo-300 underline underline-offset-4 font-khmer"
             >
-              សាកល្បងជាមួយតំណភ្ជាប់ MOSVY Regulations (ស្កេនឯកសារខ្មែរ)
+              សាកល្បងជាមួយតំណភ្ជាប់ MOSVY Regulations
             </button>
           </div>
         </div>
