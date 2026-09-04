@@ -375,13 +375,13 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                 </div>
                 <h3 className="text-sm sm:text-base font-bold text-white">
                   {processingMode === "text"
-                    ? "Paste Webpage Link to Crawl Khmer HTML Text"
-                    : "Import PDF, Image, or Webpage from Link"}
+                    ? "Crawl & Extract Khmer Webpage HTML Articles"
+                    : "Import PDF or Image from Link"}
                 </h3>
                 <p className="text-xs text-slate-400 max-w-lg mx-auto font-khmer">
                   {processingMode === "text"
-                    ? "បិទភ្ជាប់តំណភ្ជាប់ Webpage (អត្ថបទព័ត៌មាន HTML, សេចក្តីប្រកាស), PDF, Google Drive ឬ Dropbox ដើម្បីស្រង់អត្ថបទយូនីកូដខ្មែរស្អាត ១០០%"
-                    : "បញ្ចូលតំណភ្ជាប់ Webpage (HTML), Google Drive, Dropbox ឬ Direct Link នៃឯកសារ PDF ឬរូបភាពដើម្បីទាញយកដោយស្វ័យប្រវត្តិ"}
+                    ? "បិទភ្ជាប់តំណភ្ជាប់ Webpage (Fresh News, Kampuchea Thmey, Sabay ឬគេហទំព័រព័ត៌មាន) ដើម្បីស្រង់យកកថាខណ្ឌអត្ថបទយូនីកូដខ្មែរស្អាត ១០០% ដោយជម្រុះផ្ទាំង Ads និង Menu"
+                    : "បញ្ចូលតំណភ្ជាប់ (Google Drive, Dropbox ឬ Direct Link) នៃឯកសារ PDF ឬរូបភាពដើម្បីទាញយកដោយស្វ័យប្រវត្តិ"}
                 </p>
               </div>
 
@@ -396,7 +396,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                     onChange={(e) => setUrlInput(e.target.value)}
                     placeholder={
                       processingMode === "text"
-                        ? "https://... (Webpage Link, News Article HTML, PDF, Google Drive)"
+                        ? "https://www.kampucheathmey.com/... or https://freshnewsasia.com/..."
                         : "https://drive.google.com/... or https://example.com/document.pdf"
                     }
                     disabled={isFetchingUrl}
@@ -410,12 +410,12 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                     {isFetchingUrl ? (
                       <>
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        <span>Fetching...</span>
+                        <span>Crawling...</span>
                       </>
                     ) : (
                       <>
                         <Download className="h-3.5 w-3.5" />
-                        <span>Fetch & Import</span>
+                        <span>{processingMode === "text" ? "Crawl & Import" : "Fetch & Import"}</span>
                       </>
                     )}
                   </button>
@@ -424,12 +424,16 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                 <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] text-slate-500 pt-1">
                   {processingMode === "text" ? (
                     <>
-                      <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-indigo-400 font-medium">
-                        📰 Webpage HTML (News/Articles)
+                      <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-cyan-400 font-medium">
+                        📰 Khmer News & Media
+                      </span>
+                      <span>•</span>
+                      <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-indigo-300 font-medium">
+                        🏛️ Government Web Announcements
                       </span>
                       <span>•</span>
                       <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">
-                        📄 Direct PDF Link
+                        🌐 HTML Blog & Articles
                       </span>
                     </>
                   ) : (
@@ -441,33 +445,43 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                       <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">
                         🖼️ Image Link (PNG, JPG)
                       </span>
+                      <span>•</span>
+                      <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">
+                        📁 Google Drive / Dropbox
+                      </span>
                     </>
                   )}
-                  <span>•</span>
-                  <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">
-                    📁 Google Drive / Dropbox
-                  </span>
                 </div>
 
                 {/* Quick 1-Click Samples for Testing */}
                 <div className="flex flex-wrap items-center justify-center gap-2 pt-1 text-xs">
                   <span className="text-[11px] text-slate-500 font-medium">Quick Test:</span>
-                  {processingMode === "text" && (
+                  {processingMode === "text" ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setUrlInput("https://www.kampucheathmey.com/sports/1178993")}
+                        className="px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 text-[11px] transition-colors"
+                      >
+                        📰 Kampuchea Thmey Sports
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setUrlInput("https://www.kampucheathmey.com/politics/1175952")}
+                        className="px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 text-[11px] transition-colors"
+                      >
+                        📰 Kampuchea Thmey Politics
+                      </button>
+                    </>
+                  ) : (
                     <button
                       type="button"
-                      onClick={() => setUrlInput("https://www.kampucheathmey.com/sports/1178993")}
+                      onClick={() => setUrlInput("https://mosvy.gov.kh/wp-content/uploads/2021/11/02-Prakas-on-CTP-PF-Implementation.pdf")}
                       className="px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 text-[11px] transition-colors"
                     >
-                      📰 Khmer News Article
+                      📜 MoSVY PDF Prakas
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => setUrlInput("https://mosvy.gov.kh/wp-content/uploads/2021/11/02-Prakas-on-CTP-PF-Implementation.pdf")}
-                    className="px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 text-[11px] transition-colors"
-                  >
-                    📜 MoSVY PDF Prakas
-                  </button>
                 </div>
               </form>
             </div>
@@ -485,9 +499,15 @@ export const FileUpload: React.FC<FileUploadProps> = ({
           {/* File Information Row */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
             <div className="flex items-center space-x-3.5">
-              <div className="h-11 w-11 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0 shadow-md">
-                {isImageFile ? <ImageIcon className="h-5 w-5 text-indigo-400" /> : <FileText className="h-5 w-5" />}
-              </div>
+              {processingMode === "text" ? (
+                <div className="h-11 w-11 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 shrink-0 shadow-md">
+                  <Globe className="h-5 w-5 text-cyan-400" />
+                </div>
+              ) : (
+                <div className="h-11 w-11 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0 shadow-md">
+                  {isImageFile ? <ImageIcon className="h-5 w-5 text-indigo-400" /> : <FileText className="h-5 w-5" />}
+                </div>
+              )}
               <div className="overflow-hidden">
                 <h4 className="text-sm font-semibold text-white truncate max-w-xs sm:max-w-md">
                   {isMultiple
@@ -498,7 +518,9 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                   <span>{formatFileSize(totalFileSize)}</span>
                   <span>•</span>
                   <span>
-                    {isMultiple
+                    {processingMode === "text"
+                      ? `${totalPdfPages > 0 ? `${totalPdfPages} Webpage Sections / Pages` : "Webpage Article Loaded"}`
+                      : isMultiple
                       ? `${activeFileList.length} Pages (Multi-Image)`
                       : isImageFile
                       ? "Single Page Image"
@@ -547,21 +569,23 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                       if (onClearFile) onClearFile();
                       setActiveTab("url");
                     }}
-                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs text-indigo-300 hover:text-white bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-500/30 transition-colors"
-                    title="Import different file from Link / URL"
+                    className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs ${processingMode === "text" ? "text-cyan-300 hover:text-white bg-cyan-950/40 hover:bg-cyan-900/60 border border-cyan-500/30" : "text-indigo-300 hover:text-white bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-500/30"} transition-colors`}
+                    title={processingMode === "text" ? "Crawl another Webpage" : "Import different file from Link / URL"}
                   >
                     <LinkIcon className="h-3.5 w-3.5" />
-                    <span>Import Link</span>
+                    <span>{processingMode === "text" ? "New Webpage Link" : "Import Link"}</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={onClearFile}
-                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs text-slate-400 hover:text-slate-200 bg-slate-800/60 hover:bg-slate-800 border border-slate-700 transition-colors"
-                    title="Choose different file"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                    <span>Change File</span>
-                  </button>
+                  {processingMode !== "text" && (
+                    <button
+                      type="button"
+                      onClick={onClearFile}
+                      className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-800 border border-slate-700 transition-colors"
+                      title="Choose different file"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      <span>Change File</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -692,9 +716,11 @@ export const FileUpload: React.FC<FileUploadProps> = ({
               <span>
                 {isProcessing
                   ? "Processing Live Batch..."
+                  : processingMode === "text"
+                  ? `Process Webpage Article (Sections ${startPage} - ${endPage || totalPdfPages || startPage})`
                   : existingPagesCount > 0
                   ? `Extract & Append (Pages ${startPage} - ${endPage || totalPdfPages || startPage})`
-                  : `Start ${processingMode === "vision" ? "Vision OCR" : "Text Extraction"} (Pages ${startPage} - ${endPage || totalPdfPages || startPage})`}
+                  : `Start Vision OCR (Pages ${startPage} - ${endPage || totalPdfPages || startPage})`}
               </span>
             </button>
           </div>

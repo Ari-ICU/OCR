@@ -13,6 +13,7 @@ import {
   Terminal,
   Eye,
   Link as LinkIcon,
+  Globe,
   MoreHorizontal
 } from "lucide-react";
 import { API_BASE_URL } from "../config/api";
@@ -227,22 +228,22 @@ export const Navbar: React.FC<NavbarProps> = ({
                 setActiveTab("text");
                 if (setProcessingMode) setProcessingMode("text");
               }}
-              title="Digital Text: High-speed Unicode text extraction directly from digital PDF text layer"
+              title="Webpage HTML: Crawl and extract clean Khmer text directly from news articles & webpage links"
               className={`flex items-center space-x-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-xl font-semibold transition-all duration-200 shrink-0 ${
                 activeTab === "text"
                   ? "bg-indigo-600 text-white shadow-md font-bold"
                   : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
               } disabled:opacity-50`}
             >
-              <FileText className={`h-3.5 w-3.5 ${activeTab === "text" ? "text-white" : "text-emerald-400"}`} />
-              <span className="hidden sm:inline">Digital Text</span>
-              <span className="sm:hidden">Text</span>
+              <Globe className={`h-3.5 w-3.5 ${activeTab === "text" ? "text-white" : "text-cyan-400"}`} />
+              <span className="hidden sm:inline">Webpage HTML</span>
+              <span className="sm:hidden">Webpage</span>
               <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold uppercase tracking-wider ${
                 activeTab === "text"
                   ? "bg-white/20 text-white"
                   : "bg-slate-800 text-slate-400 border border-slate-700/60"
               }`}>
-                Fast
+                CRAWL
               </span>
             </button>
 

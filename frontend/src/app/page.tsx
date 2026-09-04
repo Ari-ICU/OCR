@@ -932,18 +932,18 @@ export default function Home() {
               <span>
                 {processingMode === "vision"
                   ? "Vision OCR (VLM) • 100% Khmer Subscripts (ជើង) • LaTeX Formulas ($...$)"
-                  : "Digital Text (Fast) • Direct Unicode Text Layer Extraction"}
+                  : "📰 Webpage HTML Crawler • Khmer News & Articles • Zero Ads / Menus"}
               </span>
             </div>
             <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white leading-tight">
               {processingMode === "vision"
                 ? "Convert Khmer PDFs to Clean Text & LaTeX"
-                : "Fast Digital Khmer PDF & Webpage Text Extractor"}
+                : "Khmer Webpage & Article HTML Text Crawler"}
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 font-khmer max-w-2xl mx-auto leading-relaxed">
               {processingMode === "vision"
                 ? "បំប្លែងឯកសារ PDF ភាសាខ្មែរ ទៅជាអត្ថបទស្អាត ត្រឹមត្រូវតាមស្ដង់ដារយូនីកូដ (Consonant + Subscript ជើង + Vowel + Signs) ព្រមទាំងរក្សារូបមន្តគណិតវិទ្យា/រូបវិទ្យាជាទម្រង់ LaTeX 100%"
-                : "ស្រង់អត្ថបទយូនីកូដខ្មែរដោយផ្ទាល់ពី Digital PDF ឬតំណភ្ជាប់ Webpage HTML ក្នុងល្បឿនលឿនបំផុត (Fast Native Extraction) ដោយមិនបាច់រង់ចាំ AI VLM"}
+                : "បិទភ្ជាប់តំណភ្ជាប់ Webpage (Fresh News, Kampuchea Thmey, Sabay ឬគេហទំព័ររដ្ឋាភិបាល) ដើម្បីស្រង់យកកថាខណ្ឌអត្ថបទយូនីកូដខ្មែរស្អាត ១០០% ដោយជម្រុះ Ads និង Menus ចោលទាំងអស់"}
             </p>
           </div>
 
