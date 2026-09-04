@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { Navbar, ModelInfo } from "../components/Navbar";
+import { Navbar, ModelInfo, NavTab } from "../components/Navbar";
+import { DownloadLinksView } from "../components/DownloadLinksView";
 import { FileUpload } from "../components/FileUpload";
 import { PageCard, PageResult } from "../components/PageCard";
 import { StatsBar } from "../components/StatsBar";
@@ -11,19 +12,9 @@ import { LogMonitor } from "../components/LogMonitor";
 import { KeyManagementView } from "../components/KeyManagementView";
 import { API_BASE_URL } from "../config/api";
 import {
-  FileText,
   Sparkles,
-  RefreshCw,
   BookOpen,
-  Zap,
-  CheckCircle2,
-  Copy,
-  Check,
-  Eye,
-  RotateCcw,
   Terminal,
-  Activity,
-  AlertTriangle
 } from "lucide-react";
 import { detectKhmerErrors } from "../utils/khmerValidator";
 
@@ -43,8 +34,8 @@ export default function Home() {
   const [backendHealthy, setBackendHealthy] = useState<boolean | null>(null);
   const [modelsList, setModelsList] = useState<ModelInfo[]>([]);
 
-  // Navigation: PDF vs Live Monitor vs Key Pool Tab
-  const [activeTab, setActiveTab] = useState<"pdf" | "monitor" | "keys">("pdf");
+  // Navigation: Vision OCR (#vision) vs Digital Text (#text) vs Download Links (#download) vs Monitor (#monitor) vs Keys (#keys)
+  const [activeTab, setActiveTab] = useState<NavTab>("vision");
 
   // PDF & Multi-Image processing state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -166,19 +157,45 @@ export default function Home() {
         } catch {}
       }
 
-      // Restore active main navigation tab from URL hash (#keys) or localStorage
-      const hash = typeof window !== "undefined" ? window.location.hash.replace("#", "") : "";
-      const savedTab = localStorage.getItem("khmerpdf_active_tab");
-      if (hash && ["pdf", "monitor", "keys"].includes(hash)) {
-        setActiveTab(hash as "pdf" | "monitor" | "keys");
-      } else if (savedTab && ["pdf", "monitor", "keys"].includes(savedTab)) {
-        setActiveTab(savedTab as "pdf" | "monitor" | "keys");
+      // Restore processing mode (Vision OCR vs Digital Text) from localStorage
+      const savedMode = localStorage.getItem("khmerpdf_processing_mode");
+      if (savedMode === "vision" || savedMode === "text") {
+        setProcessingMode(savedMode);
+      }
+
+      // Restore active main navigation tab from URL hash (#vision, #text, #download, #monitor, #keys) or localStorage
+      const hash = typeof window !== "undefined" ? window.location.hash.replace("#", "").toLowerCase() : "";
+      const savedTab = localStorage.getItem("khmerpdf_active_tab") as NavTab | null;
+
+      if (hash === "vision" || hash === "vision-ocr") {
+        setActiveTab("vision");
+        setProcessingMode("vision");
+      } else if (hash === "text" || hash === "digital-text") {
+        setActiveTab("text");
+        setProcessingMode("text");
+      } else if (hash === "download" || hash === "download-links" || hash === "links") {
+        setActiveTab("download");
+      } else if (hash === "monitor") {
+        setActiveTab("monitor");
+      } else if (hash === "keys") {
+        setActiveTab("keys");
+      } else if (hash === "pdf") {
+        const mode = savedMode === "text" ? "text" : "vision";
+        setActiveTab(mode);
+        setProcessingMode(mode);
+      } else if (savedTab && ["vision", "text", "download", "monitor", "keys"].includes(savedTab)) {
+        setActiveTab(savedTab);
+        if (savedTab === "vision" || savedTab === "text") {
+          setProcessingMode(savedTab);
+        }
+      } else {
+        const mode = savedMode === "text" ? "text" : "vision";
+        setActiveTab(mode);
+        setProcessingMode(mode);
       }
     } catch (e) {
       console.warn("Could not read localStorage", e);
     }
-
-
 
     // Restore PDF session from IndexedDB so refreshing keeps all work intact!
     async function restoreSession() {
@@ -204,7 +221,14 @@ export default function Home() {
           if (session.totalPdfDocPages) setTotalPdfDocPages(session.totalPdfDocPages);
           if (session.startPage) setStartPage(session.startPage);
           if (session.endPage !== undefined && session.endPage !== null) setEndPage(session.endPage);
-          if (session.processingMode) setProcessingMode(session.processingMode);
+          // Check localStorage FIRST because it stores the user's latest explicitly chosen engine mode
+          const savedMode = localStorage.getItem("khmerpdf_processing_mode");
+          if (savedMode === "vision" || savedMode === "text") {
+            setProcessingMode(savedMode);
+          } else if (session.processingMode) {
+            setProcessingMode(session.processingMode);
+            try { localStorage.setItem("khmerpdf_processing_mode", session.processingMode); } catch {}
+          }
           if (session.concurrency) setConcurrency(Math.min(2, Math.max(1, session.concurrency)));
           if (file || (session.pages && session.pages.length > 0)) {
             setSessionRestored(true);
@@ -217,6 +241,32 @@ export default function Home() {
     restoreSession();
     setMounted(true);
   }, []);
+
+  const handleSetProcessingMode = (mode: "vision" | "text") => {
+    setProcessingMode(mode);
+    try {
+      localStorage.setItem("khmerpdf_processing_mode", mode);
+    } catch {}
+    if (activeTab === "vision" || activeTab === "text") {
+      setActiveTab(mode);
+      try {
+        localStorage.setItem("khmerpdf_active_tab", mode);
+        if (typeof window !== "undefined") {
+          window.history.replaceState(null, "", `#${mode}`);
+        }
+      } catch {}
+    }
+    if (selectedFile) {
+      persistActiveSession(selectedFile, pages, {
+        totalPdfDocPages,
+        totalPages,
+        startPage,
+        endPage,
+        processingMode: mode,
+        concurrency,
+      });
+    }
+  };
 
   const handleSetApiKey = (key: string) => {
     setApiKey(key);
@@ -243,21 +293,25 @@ export default function Home() {
   const handleSetSelectedModel = (model: string) => {
     setSelectedModel(model);
     if (model === "qwen2.5:7b") {
-      setProcessingMode("text");
+      handleSetProcessingMode("text");
       setConcurrency(1);
-    } else if (model.includes("vl") || model.includes("vision") || model.includes("Flash") || model.includes("flash")) {
-      setProcessingMode("vision");
-      if (model.includes("qwen2.5vl") || model.includes("llama3.2-vision") || model.includes(":32b") || model.includes(":7b")) {
-        setConcurrency(1);
-      }
+    } else if (model.includes("qwen2.5vl") || model.includes("llama3.2-vision") || model.includes(":32b") || model.includes(":7b")) {
+      setConcurrency(1);
     }
     try {
       localStorage.setItem("khmerpdf_selected_model", model);
     } catch { }
   };
 
-  const handleSetActiveTab = (tab: "pdf" | "monitor" | "keys") => {
+  const handleSetActiveTab = (tab: NavTab) => {
     setActiveTab(tab);
+    if (tab === "vision") {
+      setProcessingMode("vision");
+      try { localStorage.setItem("khmerpdf_processing_mode", "vision"); } catch {}
+    } else if (tab === "text") {
+      setProcessingMode("text");
+      try { localStorage.setItem("khmerpdf_processing_mode", "text"); } catch {}
+    }
     try {
       localStorage.setItem("khmerpdf_active_tab", tab);
       if (typeof window !== "undefined") {
@@ -269,12 +323,26 @@ export default function Home() {
   // Keep active tab in sync when user clicks back/forward or navigates via hash
   useEffect(() => {
     const handleHashChange = () => {
-      const hash = window.location.hash.replace("#", "");
-      if (hash && ["pdf", "monitor", "keys"].includes(hash)) {
-        setActiveTab(hash as "pdf" | "monitor" | "keys");
-        try {
-          localStorage.setItem("khmerpdf_active_tab", hash);
-        } catch {}
+      const hash = window.location.hash.replace("#", "").toLowerCase();
+      if (hash === "vision" || hash === "vision-ocr") {
+        setActiveTab("vision");
+        setProcessingMode("vision");
+        try { localStorage.setItem("khmerpdf_processing_mode", "vision"); } catch {}
+      } else if (hash === "text" || hash === "digital-text") {
+        setActiveTab("text");
+        setProcessingMode("text");
+        try { localStorage.setItem("khmerpdf_processing_mode", "text"); } catch {}
+      } else if (hash === "download" || hash === "download-links" || hash === "links") {
+        setActiveTab("download");
+      } else if (hash === "monitor") {
+        setActiveTab("monitor");
+      } else if (hash === "keys") {
+        setActiveTab("keys");
+      } else if (hash === "pdf") {
+        const savedMode = localStorage.getItem("khmerpdf_processing_mode");
+        const mode = savedMode === "text" ? "text" : "vision";
+        setActiveTab(mode);
+        setProcessingMode(mode);
       }
     };
     window.addEventListener("hashchange", handleHashChange);
@@ -849,22 +917,33 @@ export default function Home() {
         activeTab={activeTab}
         setActiveTab={handleSetActiveTab}
         rateLimitHits={rateLimitHitsCount}
+        processingMode={processingMode}
+        setProcessingMode={handleSetProcessingMode}
+        isProcessing={isProcessing}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {/* TAB 1: PDF DOCUMENT PROCESSOR */}
-        <div className={activeTab === "pdf" ? "space-y-6 block" : "hidden"}>
+        {/* ROUTE 1 & 2: PDF DOCUMENT PROCESSOR (VISION OCR / DIGITAL TEXT) */}
+        <div className={(activeTab === "vision" || activeTab === "text") ? "space-y-6 block" : "hidden"}>
           {/* Hero Section */}
           <div className="text-center space-y-3 max-w-3xl mx-auto">
             <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-slate-300 text-xs font-medium">
               <Sparkles className="h-3.5 w-3.5 text-indigo-400" />
-              <span>Khmer Unicode Order • Subscripts (ជើង) • LaTeX Formulas ($...$)</span>
+              <span>
+                {processingMode === "vision"
+                  ? "Vision OCR (VLM) • 100% Khmer Subscripts (ជើង) • LaTeX Formulas ($...$)"
+                  : "Digital Text (Fast) • Direct Unicode Text Layer Extraction"}
+              </span>
             </div>
             <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white leading-tight">
-              Convert Khmer PDFs to Clean Text & LaTeX
+              {processingMode === "vision"
+                ? "Convert Khmer PDFs to Clean Text & LaTeX"
+                : "Fast Digital Khmer PDF Text Extractor"}
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 font-khmer max-w-2xl mx-auto leading-relaxed">
-              បំប្លែងឯកសារ PDF ភាសាខ្មែរ ទៅជាអត្ថបទស្អាត ត្រឹមត្រូវតាមស្ដង់ដារយូនីកូដ (Consonant + Subscript ជើង + Vowel + Signs) ព្រមទាំងរក្សារូបមន្តគណិតវិទ្យា/រូបវិទ្យាជាទម្រង់ LaTeX 100%
+              {processingMode === "vision"
+                ? "បំប្លែងឯកសារ PDF ភាសាខ្មែរ ទៅជាអត្ថបទស្អាត ត្រឹមត្រូវតាមស្ដង់ដារយូនីកូដ (Consonant + Subscript ជើង + Vowel + Signs) ព្រមទាំងរក្សារូបមន្តគណិតវិទ្យា/រូបវិទ្យាជាទម្រង់ LaTeX 100%"
+                : "ស្រង់អត្ថបទយូនីកូដខ្មែរដោយផ្ទាល់ពី Digital PDF ក្នុងល្បឿនលឿនបំផុត (Fast Native Extraction) ដោយមិនបាច់រង់ចាំ AI VLM"}
             </p>
           </div>
 
@@ -880,7 +959,7 @@ export default function Home() {
             concurrency={concurrency}
             setConcurrency={setConcurrency}
             processingMode={processingMode}
-            setProcessingMode={setProcessingMode}
+            setProcessingMode={handleSetProcessingMode}
             startPage={startPage}
             setStartPage={setStartPage}
             endPage={endPage}
@@ -992,6 +1071,21 @@ export default function Home() {
               </div>
             </div>
           )}
+        </div>
+
+        {/* ROUTE 3: DEDICATED BATCH LINK DOWNLOADER ROUTE */}
+        <div className={activeTab === "download" ? "block" : "hidden"}>
+          <DownloadLinksView
+            onProcessFiles={(files, mode) => {
+              handleFilesSelected(files);
+              handleSetProcessingMode(mode);
+              handleSetActiveTab(mode);
+            }}
+            onNavigateToEngine={(mode) => {
+              handleSetProcessingMode(mode);
+              handleSetActiveTab(mode);
+            }}
+          />
         </div>
 
         {/* TAB 2: DEDICATED LIVE MONITOR & RATE LIMIT TAB */}

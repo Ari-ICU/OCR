@@ -471,55 +471,35 @@ export const FileUpload: React.FC<FileUploadProps> = ({
               )}
 
               {!isProcessing && (
-                <button
-                  onClick={onClearFile}
-                  className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs text-slate-400 hover:text-slate-200 bg-slate-800/60 hover:bg-slate-800 border border-slate-700 transition-colors"
-                  title="Choose different file"
-                >
-                  <X className="h-3.5 w-3.5" />
-                  <span>Change File</span>
-                </button>
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onClearFile) onClearFile();
+                      setActiveTab("url");
+                    }}
+                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs text-indigo-300 hover:text-white bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-500/30 transition-colors"
+                    title="Import different file from Link / URL"
+                  >
+                    <LinkIcon className="h-3.5 w-3.5" />
+                    <span>Import Link</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onClearFile}
+                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs text-slate-400 hover:text-slate-200 bg-slate-800/60 hover:bg-slate-800 border border-slate-700 transition-colors"
+                    title="Choose different file"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    <span>Change File</span>
+                  </button>
+                </div>
               )}
             </div>
           </div>
 
           {/* Configuration Controls Bar */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 pt-1">
-            {/* Mode Selection */}
-            <div className="bg-[#070A12] border border-slate-800 rounded-xl p-3 space-y-1.5">
-              <div className="flex items-center justify-between text-[11px] font-semibold text-slate-300">
-                <span className="flex items-center space-x-1.5">
-                  <Eye className="h-3.5 w-3.5 text-indigo-400" />
-                  <span>Processing Engine</span>
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  type="button"
-                  disabled={isProcessing}
-                  onClick={() => setProcessingMode("vision")}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all text-center ${
-                    processingMode === "vision"
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
-                      : "text-slate-400 hover:text-white bg-slate-800/60"
-                  }`}
-                >
-                  Vision OCR (VLM)
-                </button>
-                <button
-                  type="button"
-                  disabled={isProcessing}
-                  onClick={() => setProcessingMode("text")}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all text-center ${
-                    processingMode === "text"
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
-                      : "text-slate-400 hover:text-white bg-slate-800/60"
-                  }`}
-                >
-                  Digital Text
-                </button>
-              </div>
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
 
             {/* Page Range Selection with Free-Type Numeric Inputs */}
             <div className="bg-[#070A12] border border-slate-800 rounded-xl p-3 space-y-1.5">
@@ -590,7 +570,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
             </div>
 
             {/* Speed & Concurrency Selector */}
-            <div className="bg-[#070A12] border border-slate-800 rounded-xl p-3 space-y-1.5 sm:col-span-2 lg:col-span-1">
+            <div className="bg-[#070A12] border border-slate-800 rounded-xl p-3 space-y-1.5">
               <div className="flex items-center justify-between text-[11px] font-semibold text-slate-300">
                 <span className="flex items-center space-x-1.5">
                   <Zap className="h-3.5 w-3.5 text-amber-400" />
