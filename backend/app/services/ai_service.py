@@ -119,6 +119,35 @@ class AIService:
     _model_cooldowns: Dict[str, float] = {}
     _model_lock = threading.Lock()
     _ollama_lock = threading.Lock()
+    _cancelled_sessions: set = set()
+    _active_session_id: Optional[str] = None
+    _session_lock = threading.Lock()
+
+    @classmethod
+    def set_active_session(cls, session_id: str):
+        with cls._session_lock:
+            cls._active_session_id = session_id
+
+    @classmethod
+    def cancel_session(cls, session_id: Optional[str] = None):
+        """Immediately marks session(s) as cancelled so active worker threads abort."""
+        with cls._session_lock:
+            if session_id:
+                cls._cancelled_sessions.add(session_id)
+            if cls._active_session_id:
+                cls._cancelled_sessions.add(cls._active_session_id)
+                cls._active_session_id = None
+
+    @classmethod
+    def is_cancelled(cls, session_id: Optional[str] = None) -> bool:
+        with cls._session_lock:
+            if session_id and session_id in cls._cancelled_sessions:
+                return True
+            if session_id and cls._active_session_id and session_id != cls._active_session_id:
+                return True
+            if not session_id and cls._active_session_id is None and len(cls._cancelled_sessions) > 0:
+                return True
+        return False
 
     @classmethod
     def mark_model_cooldown(cls, model_name: str, duration: float = 60.0):
@@ -152,12 +181,22 @@ class AIService:
         image_bytes: bytes,
         page_number: int,
         api_key: Optional[str] = None,
-        preferred_model: Optional[str] = None
+        preferred_model: Optional[str] = None,
+        session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Processes rendered page image using Gemini Multimodal Vision API
         with multi-key pool rotation, live logging & instant 429 auto-failover.
         """
+        if cls.is_cancelled(session_id):
+            return {
+                "success": False,
+                "corrected_text": "",
+                "model_used": "cancelled",
+                "elapsed_seconds": 0.0,
+                "error": "Processing cancelled by user"
+            }
+
         start_time = time.time()
         models = cls.get_prioritized_models(preferred_model)
         candidate_keys = key_pool.get_candidate_keys(api_key)
@@ -195,12 +234,30 @@ class AIService:
         max_attempts = max(8, len(candidate_keys) + 1) if candidate_keys else 8
         for model_name in models:
             for attempt in range(1, max_attempts + 1):
+                if cls.is_cancelled(session_id):
+                    return {
+                        "success": False,
+                        "corrected_text": "",
+                        "model_used": "cancelled",
+                        "elapsed_seconds": 0.0,
+                        "error": "Processing cancelled by user"
+                    }
+
                 current_key, key_alias, pool_size = key_pool.get_next_key(user_keys_raw=api_key, exclude_keys=tried_keys)
                 last_alias = key_alias
                 if key_alias not in tried_aliases:
                     tried_aliases.append(key_alias)
 
                 try:
+                    if cls.is_cancelled(session_id):
+                        return {
+                            "success": False,
+                            "corrected_text": "",
+                            "model_used": "cancelled",
+                            "elapsed_seconds": 0.0,
+                            "error": "Processing cancelled by user"
+                        }
+
                     try:
                         client = cls.get_gemini_client(current_key)
                         call_start = time.time()
@@ -621,6 +678,8 @@ class AIService:
                             details={"attempt": attempt, "error": last_error, "key_alias": key_alias}
                         )
                         if is_503:
+                            if cls.is_cancelled(session_id):
+                                return {"success": False, "corrected_text": "", "model_used": "cancelled", "elapsed_seconds": 0.0, "error": "Processing cancelled by user"}
                             cls.mark_model_cooldown(model_name, duration=90.0)
                             fallback_name = models[1] if len(models) > 1 else "fallback model"
                             log_manager.emit(
@@ -633,7 +692,12 @@ class AIService:
                             time.sleep(1.5)
                             break
                         if attempt < 4:
+                            if cls.is_cancelled(session_id):
+                                return {"success": False, "corrected_text": "", "model_used": "cancelled", "elapsed_seconds": 0.0, "error": "Processing cancelled by user"}
                             time.sleep(1.0 * attempt)
+
+            if cls.is_cancelled(session_id):
+                return {"success": False, "corrected_text": "", "model_used": "cancelled", "elapsed_seconds": 0.0, "error": "Processing cancelled by user"}
 
             log_manager.emit(
                 level="WARN",
@@ -863,7 +927,8 @@ class AIService:
         provider: str = "gemini",
         api_key: Optional[str] = None,
         preferred_model: Optional[str] = None,
-        ollama_url: str = settings.DEFAULT_OLLAMA_URL
+        ollama_url: str = settings.DEFAULT_OLLAMA_URL,
+        session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         if provider == "huggingface" or (preferred_model and (preferred_model.startswith("Qwen/") or preferred_model.startswith("meta-llama/"))):
             hf_key = api_key if (api_key and "hf_" in api_key) else settings.HUGGINGFACE_API_KEY
@@ -898,7 +963,8 @@ class AIService:
             image_bytes=image_bytes,
             page_number=page_number,
             api_key=api_key,
-            preferred_model=preferred_model
+            preferred_model=preferred_model,
+            session_id=session_id
         )
 
     @classmethod
@@ -909,7 +975,8 @@ class AIService:
         provider: str = "gemini",
         api_key: Optional[str] = None,
         preferred_model: Optional[str] = None,
-        ollama_url: str = settings.DEFAULT_OLLAMA_URL
+        ollama_url: str = settings.DEFAULT_OLLAMA_URL,
+        session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         if provider == "huggingface" or (preferred_model and (preferred_model.startswith("Qwen/") or preferred_model.startswith("meta-llama/"))):
             hf_key = api_key if (api_key and "hf_" in api_key) else settings.HUGGINGFACE_API_KEY
@@ -925,8 +992,8 @@ class AIService:
             (preferred_model and (
                 "qwen2.5vl" in preferred_model.lower() or 
                 "qwen2.5-vl" in preferred_model.lower() or 
-                "qwen2.5" in preferred_model.lower() or
-                "llama" in preferred_model.lower() or
+                "qwen2.5" in preferred_model.lower() or 
+                "llama" in preferred_model.lower() or 
                 ":7b" in preferred_model or 
                 ":14b" in preferred_model or 
                 ":32b" in preferred_model
@@ -945,6 +1012,7 @@ class AIService:
             raw_text=raw_text,
             page_number=page_number,
             api_key=api_key,
-            preferred_model=preferred_model
+            preferred_model=preferred_model,
+            session_id=session_id
         )
 

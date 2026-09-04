@@ -37,6 +37,7 @@ ACTIVE_PROCESSING_TASKS: set[asyncio.Task] = set()
 @router.post("/cancel-all-processing")
 async def cancel_all_processing_endpoint():
     """Cancels all currently running background OCR and PDF processing tasks immediately."""
+    AIService.cancel_session()
     cancelled_count = 0
     for task in list(ACTIVE_PROCESSING_TASKS):
         if not task.done():
