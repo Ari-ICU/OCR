@@ -24,4 +24,9 @@ MODEL_METADATA = settings.MODEL_METADATA
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", 8000))
+    reload = os.environ.get("RELOAD", "false").lower() in ("true", "1", "yes")
+    workers = int(os.environ.get("WORKERS", 1))
+    uvicorn.run("main:app", host=host, port=port, reload=reload, workers=workers if not reload else 1)
+

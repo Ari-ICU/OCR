@@ -15,6 +15,14 @@ class Settings:
     VERSION: str = "2.1.0"
     DESCRIPTION: str = "Scalable high-performance backend for Khmer PDF extraction, Vision OCR, and LaTeX formula restoration."
     
+    # Production & Security Settings
+    ENVIRONMENT: str = os.environ.get("ENVIRONMENT", "production")
+    ALLOWED_ORIGINS: List[str] = [
+        origin.strip() for origin in os.environ.get("ALLOWED_ORIGINS", "*").split(",") if origin.strip()
+    ]
+    MAX_UPLOAD_SIZE_MB: int = int(os.environ.get("MAX_UPLOAD_SIZE_MB", 100))
+    ENABLE_DOCS: bool = os.environ.get("ENABLE_DOCS", "false").lower() in ("true", "1")
+
     # AI Keys & URLs
     DEFAULT_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")
     HUGGINGFACE_API_KEY: str = os.environ.get("HUGGINGFACE_API_KEY", "")

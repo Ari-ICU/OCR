@@ -3,10 +3,11 @@ import urllib.error
 import urllib.request
 from typing import List, Optional, Dict, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.core.security import api_rate_limiter
 from app.services.key_manager import key_pool
 
 router = APIRouter(prefix="/keys", tags=["API Keys"])
@@ -137,8 +138,15 @@ def verify_single_key(api_key: str) -> Dict[str, Any]:
 
 
 @router.post("/verify")
-def verify_keys_endpoint(req: VerifyKeysRequest):
-    """Verifies a list of Gemini API keys live against Google API and detects real daily quota status."""
+def verify_keys_endpoint(req: VerifyKeysRequest, request: Request):
+    """Verifies a list of Gemini API keys live against Google API with rate limiting and quota verification."""
+    client_ip = request.client.host if request.client else "unknown"
+    if not api_rate_limiter.is_allowed(client_ip):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait a moment before verifying keys again.")
+
+    if len(req.keys) > 100:
+        raise HTTPException(status_code=400, detail="Maximum 100 keys can be verified per request.")
+
     import time
     results = []
     for i, k in enumerate(req.keys):

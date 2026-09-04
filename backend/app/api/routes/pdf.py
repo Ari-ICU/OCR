@@ -16,6 +16,13 @@ except ImportError:
     import fitz
 
 from app.core.config import settings
+from app.core.security import (
+    is_safe_url,
+    sanitize_filename,
+    validate_file_signature,
+    api_rate_limiter,
+    fetch_rate_limiter
+)
 from app.services.pdf_service import PDFService
 from app.services.ai_service import AIService
 from app.services.log_service import log_manager
@@ -25,7 +32,7 @@ router = APIRouter(tags=["PDF & Image Processing & Streaming"])
 SUPPORTED_EXTENSIONS = (".pdf", ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tif")
 
 async def parse_request_files(request: Request) -> Tuple[List[Tuple[str, bytes]], Dict[str, Any]]:
-    """Robustly extracts all uploaded files and form fields from request without Pydantic type adapter issues."""
+    """Robustly extracts all uploaded files and form fields with security validations."""
     form = await request.form()
     
     # Collect all file objects submitted under any key in multipart form
@@ -45,10 +52,12 @@ async def parse_request_files(request: Request) -> Tuple[List[Tuple[str, bytes]]
     if not uploads:
         raise HTTPException(status_code=400, detail="No PDF or image files were received. Please select a file.")
     
+    max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
     files_data: List[Tuple[str, bytes]] = []
+    
     for f in uploads:
-        fname = f.filename or "document.pdf"
-        content = await f.read()
+        # Sanitize filename against Path Traversal
+        fname = sanitize_filename(f.filename or "document.pdf")
         
         # Determine extension if missing
         if "." not in fname:
@@ -66,8 +75,21 @@ async def parse_request_files(request: Request) -> Tuple[List[Tuple[str, bytes]]
         if not any(fname_lower.endswith(ext) for ext in SUPPORTED_EXTENSIONS):
             raise HTTPException(status_code=400, detail=f"File '{fname}' format is unsupported. Only PDF, PNG, JPG, WEBP, and TIFF are supported.")
             
+        content = await f.read()
+        
         if len(content) == 0:
-            raise HTTPException(status_code=400, detail=f"File '{fname}' is empty (0 bytes). Please click 'Change File' and re-select your document.")
+            raise HTTPException(status_code=400, detail=f"File '{fname}' is empty (0 bytes). Please select a valid document.")
+            
+        if len(content) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File '{fname}' exceeds the maximum allowed size of {settings.MAX_UPLOAD_SIZE_MB}MB."
+            )
+            
+        # Magic bytes signature validation
+        is_valid, reason = validate_file_signature(content, fname)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=f"Security rejection for '{fname}': {reason}")
             
         files_data.append((fname, content))
     
@@ -86,6 +108,10 @@ async def extract_preview_endpoint(
     end_page: Optional[int] = Query(None)
 ):
     """Extracts raw text, metadata, and visual page thumbnails for instant preview from single or multiple PDF/Image files."""
+    client_ip = request.client.host if request.client else "unknown"
+    if not api_rate_limiter.is_allowed(client_ip):
+        raise HTTPException(status_code=429, detail="Too many requests. Please wait a moment before sending another request.")
+
     files_data, _ = await parse_request_files(request)
     extracted = PDFService.extract_pages_from_files(
         files_data,
@@ -429,10 +455,16 @@ def detect_pdf_language(title: str, filename: str, url: str) -> Tuple[str, bool]
 @router.post("/fetch-url")
 async def fetch_url_endpoint(request: Request):
     """
-    Downloads a remote PDF or image file from a public URL or cloud share link (e.g. Google Drive, Dropbox),
-    or crawls an HTML webpage article (Khmer news, government announcements) and converts it to a clean digital PDF.
-    Returns the binary content with appropriate filename headers.
+    Downloads a remote PDF or image file from a public URL or cloud share link with SSRF & size protections.
     """
+    # 1. Rate Limiting Protection
+    client_ip = request.client.host if request.client else "unknown"
+    if not fetch_rate_limiter.is_allowed(client_ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded for URL fetch. Please wait a moment before trying again."
+        )
+
     target_url = None
     if request.headers.get("content-type", "").startswith("application/json"):
         try:
@@ -449,26 +481,37 @@ async def fetch_url_endpoint(request: Request):
 
     clean_url = transform_cloud_url(str(target_url).strip())
 
+    # 2. SSRF Protection: Validate target URL against private/internal/cloud metadata addresses
+    is_safe, reason = is_safe_url(clean_url)
+    if not is_safe:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Security rejection: {reason}"
+        )
+
     # Special resolver for interior.gov.kh library detail link
     interior_hash_match = re.search(r'interior\.gov\.kh/(?:(?:kh|en)/)?library/detail/([a-zA-Z0-9_-]+)', clean_url)
     if interior_hash_match:
         doc_hash = interior_hash_match.group(1)
         try:
-            with httpx.Client(verify=False, timeout=10.0) as temp_client:
+            with httpx.Client(verify=True, timeout=10.0) as temp_client:
                 api_res = temp_client.get(f"https://web-api.interior.gov.kh/api/v1/public/document/{doc_hash}")
                 if api_res.status_code == 200:
                     api_json = api_res.json()
                     direct_file = api_json.get("data", {}).get("file_url")
                     if direct_file:
-                        clean_url = direct_file
+                        safe_df, _ = is_safe_url(direct_file)
+                        if safe_df:
+                            clean_url = direct_file
         except Exception:
             pass
+
+    max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
     try:
         async with httpx.AsyncClient(
             follow_redirects=True,
             timeout=45.0,
-            verify=False,
             headers={
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/120.0.0.0",
                 "Accept": "*/*",
@@ -479,9 +522,21 @@ async def fetch_url_endpoint(request: Request):
             if resp.status_code != 200:
                 raise HTTPException(status_code=400, detail=f"Failed to download file from link (HTTP {resp.status_code}). Please make sure the link is publicly accessible.")
             
+            # Re-verify final redirected URL against SSRF
+            final_url = str(resp.url)
+            final_safe, final_reason = is_safe_url(final_url)
+            if not final_safe:
+                raise HTTPException(status_code=403, detail=f"Security rejection on redirect: {final_reason}")
+
             raw_content = resp.content
             if not raw_content or len(raw_content) == 0:
                 raise HTTPException(status_code=400, detail="The provided link returned an empty file.")
+
+            if len(raw_content) > max_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Downloaded file exceeds maximum permitted size of {settings.MAX_UPLOAD_SIZE_MB}MB."
+                )
 
             ctype = resp.headers.get("content-type", "").lower()
             is_html = (
@@ -523,6 +578,15 @@ async def fetch_url_endpoint(request: Request):
                     filename = "imported_image.webp"
                 else:
                     filename = "imported_document.pdf"
+
+            # Sanitize filename
+            filename = sanitize_filename(filename, default="imported_document.pdf")
+
+            # Validate magic bytes signature
+            sig_valid, sig_reason = validate_file_signature(content, filename)
+            if not sig_valid:
+                raise HTTPException(status_code=400, detail=f"Security rejection for downloaded file: {sig_reason}")
+
 
             media_type = "application/pdf" if filename.lower().endswith(".pdf") else (ctype or "image/png")
 
