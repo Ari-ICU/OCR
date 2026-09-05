@@ -658,9 +658,11 @@ class DatasetService:
 
                 target_url = doc_item["url"]
                 doc_title = doc_item.get("title") or f"Doc_{doc_idx + 1}"
+                doc_preferred_filename = doc_item.get("filename")
 
                 try:
-                    filename, content = await DatasetService.fetch_pdf_bytes_from_url(target_url)
+                    dl_filename, content = await DatasetService.fetch_pdf_bytes_from_url(target_url)
+                    filename = doc_preferred_filename or dl_filename
                 except Exception as e:
                     yield f"event: doc_error\ndata: {json.dumps({'type': 'doc_error', 'doc_index': doc_idx + 1, 'url': target_url, 'error': str(e)})}\n\n"
                     continue

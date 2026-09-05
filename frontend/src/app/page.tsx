@@ -831,6 +831,9 @@ export default function Home() {
     setIsProcessing(true);
     setErrorMessage(null);
     setActiveWorkerPages([]);
+    setPages([]);
+    setTotalPages(0);
+    setTotalPdfDocPages(0);
 
     const effectiveProvider = getProviderForModel(selectedModel);
     const sPage = startPageNum || startPage || 1;
@@ -915,6 +918,11 @@ export default function Home() {
               if (data.filename) {
                 setSelectedFiles((prev) => {
                   if (prev.some((f) => f.name === data.filename)) return prev;
+                  if (data.doc_index && data.doc_index <= prev.length) {
+                    const copy = [...prev];
+                    copy[data.doc_index - 1] = new File([], data.filename, { type: "application/pdf" });
+                    return copy;
+                  }
                   return [...prev, new File([], data.filename, { type: "application/pdf" })];
                 });
                 if (!selectedFile) {
