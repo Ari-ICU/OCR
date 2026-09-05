@@ -429,6 +429,61 @@ export default function Home() {
     handleFilesSelected(combined);
   };
 
+  const handleLoadServerPages = (
+    serverPages: any[],
+    filename: string,
+    totalDocPages?: number
+  ) => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    fetch(`${API_BASE_URL}/api/cancel-all-processing`, { method: "POST" }).catch(() => {});
+    setIsProcessing(false);
+    setActiveWorkerPages([]);
+
+    const convertedPages: PageResult[] = serverPages.map((p, idx) => {
+      const pText = p.corrected_text || p.text || p.raw_text || "";
+      return {
+        page_number: p.page_number || idx + 1,
+        raw_text: p.raw_text || pText,
+        corrected_text: pText,
+        model_used: p.model_used || "server-dataset",
+        elapsed_seconds: p.elapsed_seconds || 0.05,
+        tokens_used: p.total_tokens || 0,
+        success: true,
+        char_count: p.char_count || pText.length,
+        word_count: p.word_count || pText.split(/\s+/).filter(Boolean).length,
+        has_formulas: p.has_formulas || Boolean(pText.match(/(=|\+|-|\/|\*|\^|\\sqrt|\\frac)/)),
+        thumbnail: p.thumbnail || "",
+        is_blank: p.is_blank || Boolean(pText.includes("[ទំព័រទទេ") || pText.includes("Blank Page")),
+        file_name: p.file_name || filename,
+        doc_page_number: p.doc_page_number || p.page_number || idx + 1,
+      };
+    });
+
+    setPages(convertedPages);
+    const total = totalDocPages || convertedPages.length;
+    setTotalPages(convertedPages.length);
+    setTotalPdfDocPages(total);
+    setStartPage(1);
+    setEndPage(total);
+    setErrorMessage(null);
+    setSelectedDocFilter("all");
+
+    // Persist session with loaded server pages
+    const dummyFile = selectedFile || new File([], filename, { type: "application/pdf" });
+    persistActiveSession([dummyFile], convertedPages, {
+      totalPdfDocPages: total,
+      totalPages: convertedPages.length,
+      startPage: 1,
+      endPage: total,
+      processingMode,
+      concurrency,
+      multiPdfMode,
+    });
+  };
+
   const handleRemoveFile = (index: number) => {
     const updated = selectedFiles.filter((_, i) => i !== index);
     if (updated.length === 0) {
@@ -1064,6 +1119,7 @@ export default function Home() {
             onClearExtractedPages={handleClearExtractedPages}
             existingPageNumbers={existingPageNumbers}
             sessionRestored={sessionRestored}
+            onLoadServerPages={handleLoadServerPages}
           />
 
           {/* Error Display */}

@@ -52,5 +52,16 @@ class Settings:
         }
     ]
 
+    # Storage & Dataset Paths (check project root /Users/thoeurnratha/Desktop/pdf-text)
+    _backend_dir: Path = Path(__file__).resolve().parent.parent.parent
+    BASE_DIR: Path = _backend_dir.parent if (_backend_dir.parent / "pdf").exists() else _backend_dir
+    DATASET_DIR: Path = BASE_DIR / "pdf"
+    TXT_DIR: Path = BASE_DIR / "txt"
+    JSONL_DIR: Path = BASE_DIR / "jsonl"
+
 settings = Settings()
+# Ensure directories exist
+settings.DATASET_DIR.mkdir(parents=True, exist_ok=True)
+settings.TXT_DIR.mkdir(parents=True, exist_ok=True)
+settings.JSONL_DIR.mkdir(parents=True, exist_ok=True)
 

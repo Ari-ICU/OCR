@@ -81,7 +81,8 @@ def is_safe_url(url_str: str) -> Tuple[bool, str]:
 
 def sanitize_filename(filename: str, default: str = "document.pdf") -> str:
     """
-    Safely sanitizes uploaded filenames against Path Traversal and illegal characters.
+    Safely sanitizes filenames against Path Traversal and illegal filesystem characters,
+    preserving full Khmer Unicode characters, letters, digits, and punctuation.
     """
     if not filename:
         return default
@@ -90,9 +91,8 @@ def sanitize_filename(filename: str, default: str = "document.pdf") -> str:
     normalized = filename.replace("\\", "/")
     clean = os.path.basename(normalized)
     
-    # Allow alphanumeric, spaces, hyphens, underscores, dots, and parentheses
-    clean = re.sub(r'[^\w\s\.\-_()]', '', clean).strip()
-
+    # Strip dangerous shell/filesystem characters like / \ : * ? " < > | and null bytes
+    clean = re.sub(r'[\/\\:\*\?"<>\|\x00]', '', clean).strip()
     
     # Prevent hidden files (.bashrc)
     if clean.startswith("."):
