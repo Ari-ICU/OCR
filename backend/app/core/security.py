@@ -190,3 +190,38 @@ api_rate_limiter = SlidingWindowRateLimiter(max_requests=120, window_seconds=60)
 
 # 2. Strict download/crawl rate limiter: 20 requests / min
 fetch_rate_limiter = SlidingWindowRateLimiter(max_requests=20, window_seconds=60)
+
+
+def transform_cloud_url(raw_url: str) -> str:
+    """Transforms Google Drive, Dropbox, and cloud share links into direct downloadable URLs."""
+    import urllib.parse
+    url = raw_url.strip()
+    
+    # Google Drive view link: https://drive.google.com/file/d/{FILE_ID}/view...
+    gdrive_match = re.search(r'drive\.google\.com/file/d/([a-zA-Z0-9_-]+)', url)
+    if gdrive_match:
+        file_id = gdrive_match.group(1)
+        return f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
+    
+    # Google Drive open link: https://drive.google.com/open?id={FILE_ID}
+    gdrive_open_match = re.search(r'drive\.google\.com/open\?id=([a-zA-Z0-9_-]+)', url)
+    if gdrive_open_match:
+        file_id = gdrive_open_match.group(1)
+        return f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
+
+    # Dropbox link: dl=0 -> dl=1
+    if "dropbox.com" in url and "dl=0" in url:
+        return url.replace("dl=0", "dl=1")
+    elif "dropbox.com" in url and "dl=1" not in url:
+        return url + ("&dl=1" if "?" in url else "?dl=1")
+
+    # If URL contains non-ascii characters in the path, safely encode them
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        quoted_path = urllib.parse.quote(urllib.parse.unquote(parsed.path))
+        return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, quoted_path, parsed.query, parsed.fragment))
+    except Exception:
+        pass
+
+    return url
+

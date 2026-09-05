@@ -16,8 +16,7 @@ except ImportError:
     import fitz
 
 from app.core.config import settings
-from app.core.security import sanitize_filename, is_safe_url
-from app.api.routes.pdf import transform_cloud_url
+from app.core.security import sanitize_filename, is_safe_url, transform_cloud_url
 from app.models.dataset import (
     InspectUrlRequest,
     DiscoveredPdfItem,
@@ -82,12 +81,35 @@ class DatasetService:
                             base = parsed.path.split("/")[-1]
                             title = urllib.parse.unquote(base) if base else f"Document_{len(discovered) + 1}"
 
+                        pages = None
+                        page_keys = ["pages", "total_pages", "page_count", "num_pages", "total_page", "pages_count", "page", "count"]
+                        for p_key in page_keys:
+                            p_val = obj.get(p_key)
+                            if isinstance(p_val, int) and p_val > 0:
+                                pages = p_val
+                                break
+                            elif isinstance(p_val, str) and p_val.strip().isdigit() and int(p_val.strip()) > 0:
+                                pages = int(p_val.strip())
+                                break
+
+                        # If page count is not in JSON metadata, check if file exists locally in DATASET_DIR
+                        if not pages:
+                            url_filename = abs_url.split("/")[-1].split("?")[0]
+                            local_candidate = settings.DATASET_DIR / sanitize_filename(url_filename)
+                            if local_candidate.exists() and local_candidate.is_file():
+                                try:
+                                    with fitz.open(str(local_candidate)) as temp_doc:
+                                        pages = len(temp_doc)
+                                except Exception:
+                                    pass
+
                         fn = sanitize_filename(f"{title}.pdf" if not title.lower().endswith(".pdf") else title)
                         discovered.append({
                             "url": abs_url,
                             "title": title,
                             "filename": fn,
                             "source_id": str(obj.get("id") or obj.get("_id") or len(discovered) + 1),
+                            "pages": pages,
                             "extra": {k: str(v) for k, v in obj.items() if k not in url_keys and isinstance(v, (str, int, float, bool))}
                         })
 
@@ -163,12 +185,21 @@ class DatasetService:
                             filename = urllib.parse.unquote(base)
 
                     safe_name = sanitize_filename(filename)
+                    pdf_pages = None
+                    try:
+                        with fitz.open(stream=raw_body, filetype="pdf") as temp_doc:
+                            pdf_pages = len(temp_doc)
+                    except Exception:
+                        pass
+
                     return {
                         "is_store": False,
                         "is_direct_pdf": True,
                         "url": str(resp.url),
                         "filename": safe_name,
-                        "size_bytes": len(raw_body)
+                        "size_bytes": len(raw_body),
+                        "pages": pdf_pages,
+                        "total_pages": pdf_pages
                     }
 
                 # Case B: JSON API endpoint from backend database store
@@ -176,10 +207,12 @@ class DatasetService:
                     json_data = resp.json()
                     discovered = DatasetService.extract_pdfs_from_json(json_data, str(resp.url))
                     if discovered:
+                        total_store_pages = sum(d["pages"] for d in discovered if d.get("pages"))
                         return {
                             "is_store": True,
                             "store_url": str(resp.url),
                             "total_pdfs": len(discovered),
+                            "total_pages": total_store_pages if total_store_pages > 0 else None,
                             "database_response_type": "json",
                             "pdfs": discovered
                         }

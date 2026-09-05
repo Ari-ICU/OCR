@@ -193,8 +193,16 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     }
   };
 
-  const handleFetchFromUrl = async () => {
-    const cleanUrl = urlInput.trim();
+  const handleFetchFromUrl = async (specificUrl?: string) => {
+    let cleanUrl = typeof specificUrl === "string" && specificUrl.trim() ? specificUrl.trim() : urlInput.trim();
+
+    // If target is a detected database store and no specific file URL is provided, pick the first PDF
+    if (storeInspection?.is_store && storeInspection.pdfs && storeInspection.pdfs.length > 0) {
+      if (!specificUrl || typeof specificUrl !== "string") {
+        cleanUrl = storeInspection.pdfs[0].url;
+      }
+    }
+
     if (!cleanUrl) {
       setError("Please enter a valid link (URL).");
       return;

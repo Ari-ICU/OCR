@@ -19,6 +19,7 @@ export interface DiscoveredPdfItem {
   title: string;
   filename: string;
   source_id?: string;
+  pages?: number;
   extra?: Record<string, string>;
 }
 
@@ -28,6 +29,8 @@ export interface InspectStoreResult {
   url?: string;
   filename?: string;
   size_bytes?: number;
+  pages?: number;
+  total_pages?: number;
   store_url?: string;
   total_pdfs?: number;
   database_response_type?: "json" | "html_index";

@@ -35,7 +35,7 @@ interface UrlImportBarProps {
   activeFilesCount: number;
   handleInspectStoreUrl: (urlOverride?: string) => Promise<void>;
   handleConvertUrlToTxt: (e?: React.FormEvent) => Promise<void>;
-  handleFetchFromUrl: () => Promise<void>;
+  handleFetchFromUrl: (specificUrl?: string) => Promise<void>;
   handleConvertBatchUrlsToTxt: () => Promise<void>;
   onProcessUrlStream?: (url: string, start?: number, end?: number | null) => Promise<void>;
   startInput: string;
@@ -189,16 +189,21 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
                       <Database className="h-4 w-4" />
                     </div>
                     <div>
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                         <h4 className="text-xs sm:text-sm font-semibold text-white">
                           Database Store Detected
                         </h4>
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                           {storeInspection.total_pdfs} PDFs Ready
                         </span>
+                        {storeInspection.total_pages ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                            {storeInspection.total_pages} Total Pages
+                          </span>
+                        ) : null}
                       </div>
                       <p className="text-[11px] text-slate-400 font-khmer">
-                        រកឃើញឯកសារ PDF ចំនួន {storeInspection.total_pdfs} ក្នុង Database — ការបំប្លែងនឹងធ្វើឡើងផ្ទាល់នៅលើ Server
+                        រកឃើញឯកសារ PDF ចំនួន {storeInspection.total_pdfs} {storeInspection.total_pages ? `(${storeInspection.total_pages} ទំព័រ)` : ""} ក្នុង Database — ការបំប្លែងនឹងធ្វើឡើងផ្ទាល់នៅលើ Server
                       </p>
                     </div>
                   </div>
@@ -225,11 +230,16 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
                           #{idx + 1}
                         </span>
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center space-x-1.5">
+                          <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
                             <FileText className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
                             <span className="font-medium text-slate-200 truncate" title={pdf.title}>
                               {pdf.title}
                             </span>
+                            {pdf.pages !== undefined && pdf.pages !== null ? (
+                              <span className="text-[10px] font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 rounded shrink-0">
+                                {pdf.pages} {pdf.pages === 1 ? "page" : "pages"}
+                              </span>
+                            ) : null}
                             {pdf.source_id && (
                               <span className="text-[10px] font-mono text-slate-400 bg-slate-800/80 px-1.5 py-0.5 rounded shrink-0">
                                 ID: {pdf.source_id}
@@ -242,19 +252,36 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
                         </div>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setUrlInput(pdf.url);
-                          if (onProcessUrlStream) {
-                            onProcessUrlStream(pdf.url, 1, null);
-                          }
-                        }}
-                        disabled={isConvertingUrl || isProcessing}
-                        className="shrink-0 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-600 hover:text-white text-slate-300 text-[11px] font-medium border border-slate-700/60 transition-colors cursor-pointer"
-                      >
-                        Convert This
-                      </button>
+                      <div className="flex items-center space-x-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUrlInput(pdf.url);
+                            handleFetchFromUrl(pdf.url);
+                          }}
+                          disabled={isFetchingUrl || isConvertingUrl || isProcessing}
+                          className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-medium border border-slate-700/60 transition-colors cursor-pointer flex items-center gap-1"
+                          title="Load this PDF's pages into workspace to view thumbnails"
+                        >
+                          <FileUp className="h-3 w-3 text-slate-400" />
+                          <span>Preview Pages</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUrlInput(pdf.url);
+                            if (onProcessUrlStream) {
+                              onProcessUrlStream(pdf.url, 1, null);
+                            }
+                          }}
+                          disabled={isConvertingUrl || isProcessing}
+                          className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1"
+                          title="Convert directly to TXT on server"
+                        >
+                          <Zap className="h-3 w-3 text-amber-300" />
+                          <span>Convert</span>
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -283,9 +310,18 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
 
             {/* Direct PDF Detection Alert */}
             {storeInspection?.is_direct_pdf && (
-              <div className="flex items-center space-x-2 p-2.5 rounded-xl bg-emerald-950/20 border border-emerald-500/20 text-xs text-emerald-300 animate-in fade-in duration-200">
-                <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-                <span>Direct PDF Verified: <strong className="text-white font-mono">{storeInspection.filename}</strong></span>
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-950/20 border border-emerald-500/20 text-xs text-emerald-300 animate-in fade-in duration-200">
+                <div className="flex items-center space-x-2 min-w-0">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                  <span className="truncate">
+                    Direct PDF Verified: <strong className="text-white font-mono">{storeInspection.filename}</strong>
+                  </span>
+                </div>
+                {storeInspection.pages ? (
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 font-semibold text-[11px] shrink-0 border border-emerald-500/30">
+                    {storeInspection.pages} {storeInspection.pages === 1 ? "page" : "pages"}
+                  </span>
+                ) : null}
               </div>
             )}
 
@@ -333,7 +369,7 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
 
               <button
                 type="button"
-                onClick={handleFetchFromUrl}
+                onClick={() => handleFetchFromUrl()}
                 disabled={isFetchingUrl || isConvertingUrl || isProcessing || !urlInput.trim()}
                 className="text-slate-400 hover:text-slate-200 disabled:opacity-40 flex items-center space-x-1.5 transition-colors py-1 cursor-pointer"
                 title="Load into workspace if you want to inspect thumbnails first"

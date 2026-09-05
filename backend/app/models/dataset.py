@@ -11,6 +11,7 @@ class DiscoveredPdfItem(BaseModel):
     title: str
     filename: str
     source_id: Optional[str] = None
+    pages: Optional[int] = None
     extra: Optional[Dict[str, Any]] = None
 
 
@@ -21,6 +22,8 @@ class InspectUrlResponse(BaseModel):
     title: Optional[str] = None
     filename: Optional[str] = None
     total_pdfs: int = 0
+    total_pages: Optional[int] = None
+    pages: Optional[int] = None
     pdfs: List[DiscoveredPdfItem] = []
 
 
