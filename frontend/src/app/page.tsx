@@ -851,6 +851,227 @@ export default function Home() {
     });
   };
 
+  // Direct Server-Side URL-to-TXT SSE Streaming
+  const handleProcessUrlStream = async (
+    url: string,
+    startPageNum?: number,
+    endPageNum?: number | null
+  ) => {
+    if (!url || !url.trim()) return;
+    const cleanUrl = url.trim();
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
+    setIsProcessing(true);
+    setErrorMessage(null);
+    setActiveWorkerPages([]);
+
+    const effectiveProvider = getProviderForModel(selectedModel);
+    const sPage = startPageNum || startPage || 1;
+    const ePage = endPageNum !== undefined ? endPageNum : endPage;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/dataset/url-to-txt-stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: cleanUrl,
+          start_page: sPage,
+          end_page: ePage,
+          mode: processingMode,
+          provider: effectiveProvider,
+          model: selectedModel,
+          api_key: apiKey || undefined,
+          save_to_txt: true,
+          save_to_jsonl: true,
+          save_to_pdf_dataset: true,
+        }),
+        signal: abortControllerRef.current.signal,
+      });
+
+      if (!response.ok) {
+        const errorJson = await response.json().catch(() => null);
+        throw new Error(errorJson?.detail || `Server returned HTTP ${response.status}`);
+      }
+
+      if (!response.body) {
+        throw new Error("ReadableStream not supported in response.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const normalized = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+        const blocks = normalized.split("\n\n");
+        buffer = blocks.pop() || "";
+
+        for (const block of blocks) {
+          if (!block.trim()) continue;
+
+          let eventType = "message";
+          const dataLines: string[] = [];
+
+          for (const rawLine of block.split("\n")) {
+            const line = rawLine.trim();
+            if (line.startsWith("event:")) {
+              eventType = line.slice(6).trim();
+            } else if (rawLine.startsWith("data:")) {
+              dataLines.push(rawLine.replace(/^data:\s?/, ""));
+            }
+          }
+
+          const dataStr = dataLines.join("\n").trim();
+          if (!dataStr) continue;
+
+          try {
+            const data = JSON.parse(dataStr);
+            const actualType = data.type || eventType;
+
+            if (actualType === "init") {
+              const docTotal = data.total_pages || 0;
+              setTotalPdfDocPages(docTotal);
+              setTotalPages(data.selected_count || docTotal);
+              if (data.filename && !selectedFile) {
+                const dummy = new File([], data.filename, { type: "application/pdf" });
+                setSelectedFile(dummy);
+              }
+            } else if (actualType === "page_start") {
+              setActiveWorkerPages((prev) => Array.from(new Set([...prev, data.page_number])));
+              setPages((prev) => {
+                const exists = prev.some((p) => p.page_number === data.page_number);
+                if (exists) {
+                  return prev.map((p) =>
+                    p.page_number === data.page_number
+                      ? { ...p, isProcessing: true, file_name: data.file_name || p.file_name }
+                      : p
+                  );
+                } else {
+                  const newP: PageResult = {
+                    page_number: data.page_number,
+                    file_name: data.file_name || "",
+                    doc_page_number: data.doc_page_number || data.page_number,
+                    raw_text: "",
+                    corrected_text: "",
+                    model_used: "",
+                    elapsed_seconds: 0,
+                    success: false,
+                    isProcessing: true,
+                    word_count: 0,
+                    char_count: 0,
+                    has_formulas: false,
+                  };
+                  return [...prev, newP].sort((a, b) => a.page_number - b.page_number);
+                }
+              });
+            } else if (actualType === "page_done" || actualType === "page_complete") {
+              setActiveWorkerPages((prev) => prev.filter((num) => num !== data.page_number));
+              setPages((prev) => {
+                const exists = prev.some((p) => p.page_number === data.page_number);
+                let updated: PageResult[];
+                if (exists) {
+                  updated = prev.map((p) =>
+                    p.page_number === data.page_number
+                      ? {
+                          ...p,
+                          page_number: data.page_number,
+                          file_name: data.file_name || p.file_name,
+                          doc_page_number: data.doc_page_number || p.doc_page_number,
+                          raw_text: data.raw_text || p.raw_text,
+                          corrected_text: data.corrected_text ?? p.corrected_text,
+                          model_used: data.model_used ?? p.model_used,
+                          elapsed_seconds: data.elapsed_seconds ?? p.elapsed_seconds,
+                          tokens_used: data.tokens_used ?? p.tokens_used,
+                          success: data.success ?? true,
+                          error: data.error,
+                          is_blank: Boolean(data.is_blank || data.model_used === "blank-skipped"),
+                          thumbnail: data.thumbnail || p.thumbnail,
+                          has_formulas: Boolean(
+                            data.has_formulas ||
+                              data.corrected_text?.match(/(=|\+|-|\/|\*|\^|\\sqrt|\\frac)/)
+                          ),
+                          char_count: data.char_count || (data.corrected_text || "").length,
+                          word_count:
+                            data.word_count ||
+                            (data.corrected_text || "").split(/\s+/).filter(Boolean).length,
+                          isProcessing: false,
+                        }
+                      : p
+                  );
+                } else {
+                  const newP: PageResult = {
+                    page_number: data.page_number,
+                    file_name: data.file_name || "",
+                    doc_page_number: data.doc_page_number || data.page_number,
+                    raw_text: data.raw_text || "",
+                    corrected_text: data.corrected_text || "",
+                    model_used: data.model_used || "gemini",
+                    elapsed_seconds: data.elapsed_seconds || 0,
+                    tokens_used: data.tokens_used || 0,
+                    success: data.success ?? true,
+                    error: data.error,
+                    is_blank: Boolean(data.is_blank || data.model_used === "blank-skipped"),
+                    thumbnail: data.thumbnail || "",
+                    has_formulas: Boolean(
+                      data.has_formulas ||
+                        data.corrected_text?.match(/(=|\+|-|\/|\*|\^|\\sqrt|\\frac)/)
+                    ),
+                    char_count: data.char_count || (data.corrected_text || "").length,
+                    word_count:
+                      data.word_count ||
+                      (data.corrected_text || "").split(/\s+/).filter(Boolean).length,
+                    isProcessing: false,
+                  };
+                  updated = [...prev, newP].sort((a, b) => a.page_number - b.page_number);
+                }
+                persistPagesOnly(updated);
+                return updated;
+              });
+            } else if (actualType === "done") {
+              // Conversion finished successfully
+            } else if (actualType === "error") {
+              setErrorMessage(data.error || "An error occurred during URL conversion.");
+            }
+          } catch (e) {
+            console.error("URL SSE parse error", e, dataStr);
+          }
+        }
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") {
+        console.log("URL PDF conversion aborted.");
+      } else {
+        setErrorMessage(
+          err instanceof Error ? err.message : "Failed to convert PDF from server URL."
+        );
+      }
+    } finally {
+      setIsProcessing(false);
+      setActiveWorkerPages([]);
+      setPages((prev) => {
+        const cleaned = prev.map((p) => (p.isProcessing ? { ...p, isProcessing: false } : p));
+        persistPagesOnly(cleaned);
+        return cleaned;
+      });
+      abortControllerRef.current = null;
+    }
+  };
+
+  const handleProcessBatchUrlsStream = async (urls: string[]) => {
+    for (let i = 0; i < urls.length; i++) {
+      if (abortControllerRef.current?.signal.aborted) break;
+      await handleProcessUrlStream(urls[i]);
+    }
+  };
+
 
   // Re-process a single page with AI and persist
   const handleReprocessSinglePage = async (pageNum: number, modelToUse?: string) => {
@@ -1120,6 +1341,8 @@ export default function Home() {
             existingPageNumbers={existingPageNumbers}
             sessionRestored={sessionRestored}
             onLoadServerPages={handleLoadServerPages}
+            onProcessUrlStream={handleProcessUrlStream}
+            onProcessBatchUrlsStream={handleProcessBatchUrlsStream}
           />
 
           {/* Error Display */}

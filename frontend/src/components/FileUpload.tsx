@@ -79,6 +79,8 @@ interface FileUploadProps {
   existingPageNumbers?: number[];
   sessionRestored?: boolean;
   onLoadServerPages?: (pages: any[], filename: string, totalDocPages?: number) => void;
+  onProcessUrlStream?: (url: string, startPage?: number, endPage?: number | null) => Promise<void>;
+  onProcessBatchUrlsStream?: (urls: string[]) => Promise<void>;
 }
 
 export const FileUpload: React.FC<FileUploadProps> = ({
@@ -108,41 +110,22 @@ export const FileUpload: React.FC<FileUploadProps> = ({
   existingPageNumbers = [],
   sessionRestored = false,
   onLoadServerPages,
+  onProcessUrlStream,
+  onProcessBatchUrlsStream,
 }) => {
-  const [activeTab, setActiveTab] = useState<"file" | "url" | "dataset">("file");
+  // Default to 'url' tab for Server Store PDF input
+  const [activeTab, setActiveTab] = useState<"url" | "file">("url");
+  const [urlMode, setUrlMode] = useState<"single" | "batch">("single");
   const [urlInput, setUrlInput] = useState<string>("");
+  const [batchUrlsInput, setBatchUrlsInput] = useState<string>("");
   const [isFetchingUrl, setIsFetchingUrl] = useState<boolean>(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const addFileInputRef = useRef<HTMLInputElement>(null);
 
-  // Server Dataset State
-  const [datasetFiles, setDatasetFiles] = useState<DatasetFileItem[]>([]);
-  const [isLoadingDataset, setIsLoadingDataset] = useState<boolean>(false);
-  const [datasetSearch, setDatasetSearch] = useState<string>("");
-  const [loadingDatasetFile, setLoadingDatasetFile] = useState<string | null>(null);
-  const [convertingDatasetFile, setConvertingDatasetFile] = useState<string | null>(null);
-
-  // Fetch dataset files from API server
-  const fetchDatasetFiles = async () => {
-    setIsLoadingDataset(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/dataset/files`);
-      if (res.ok) {
-        const data = await res.json();
-        setDatasetFiles(data.files || []);
-      }
-    } catch (err) {
-      console.warn("Failed to fetch dataset files:", err);
-    } finally {
-      setIsLoadingDataset(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchDatasetFiles();
-  }, []);
+  const [isConvertingUrl, setIsConvertingUrl] = useState<boolean>(false);
+  const [isProcessingBatch, setIsProcessingBatch] = useState<boolean>(false);
 
   // Local string buffers for buttery smooth typing & deleting
   const [startInput, setStartInput] = useState<string>(String(startPage || 1));
@@ -347,6 +330,116 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     }
   };
 
+  const handleConvertUrlToTxt = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const cleanUrl = urlInput.trim();
+    if (!cleanUrl) {
+      setError("Please enter a valid PDF URL from your server store.");
+      return;
+    }
+    if (!cleanUrl.startsWith("http://") && !cleanUrl.startsWith("https://")) {
+      setError("URL must start with http:// or https://");
+      return;
+    }
+
+    if (onProcessUrlStream) {
+      setIsConvertingUrl(true);
+      setError(null);
+      try {
+        await onProcessUrlStream(cleanUrl, startPage, endPage);
+      } catch (err: any) {
+        setError(err?.message || "Failed to convert PDF from URL on server.");
+      } finally {
+        setIsConvertingUrl(false);
+      }
+      return;
+    }
+
+    setIsConvertingUrl(true);
+    setError(null);
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/dataset/url-to-txt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: cleanUrl,
+          start_page: startPage,
+          end_page: endPage,
+          mode: processingMode,
+          use_ai: true,
+          save_to_txt: true,
+          save_to_jsonl: true,
+          save_to_pdf_dataset: true,
+        }),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.detail || `Server conversion failed (HTTP ${res.status})`);
+      }
+
+      const data = await res.json();
+      if (data.pages && onLoadServerPages) {
+        onLoadServerPages(data.pages, data.filename, data.total_pages);
+      }
+    } catch (err: any) {
+      setError(err?.message || "Failed to convert PDF from URL on server.");
+    } finally {
+      setIsConvertingUrl(false);
+    }
+  };
+
+  const handleConvertBatchUrlsToTxt = async () => {
+    const lines = batchUrlsInput
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("http://") || l.startsWith("https://"));
+
+    if (lines.length === 0) {
+      setError("Please enter at least one valid server store URL (one per line).");
+      return;
+    }
+
+    setIsProcessingBatch(true);
+    setError(null);
+
+    try {
+      if (onProcessBatchUrlsStream) {
+        await onProcessBatchUrlsStream(lines);
+      } else if (onProcessUrlStream) {
+        for (const u of lines) {
+          await onProcessUrlStream(u, 1, null);
+        }
+      } else {
+        for (const u of lines) {
+          const res = await fetch(`${API_BASE_URL}/api/dataset/url-to-txt`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              url: u,
+              mode: processingMode,
+              use_ai: true,
+              save_to_txt: true,
+              save_to_jsonl: true,
+              save_to_pdf_dataset: true,
+            }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.pages && onLoadServerPages) {
+              onLoadServerPages(data.pages, data.filename, data.total_pages);
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      setError(err?.message || "Failed to convert batch URLs.");
+    } finally {
+      setIsProcessingBatch(false);
+    }
+  };
+
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return "0 Bytes";
     const k = 1024;
@@ -370,85 +463,27 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     setEndPage(Math.min(nextStart + currentSpan - 1, totalPdfPages || nextStart));
   };
 
-  const handleLoadDatasetFile = async (f: DatasetFileItem) => {
-    setLoadingDatasetFile(f.filename);
-    setError(null);
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/dataset/file/${encodeURIComponent(f.filename)}`);
-      if (!res.ok) throw new Error("Failed to load PDF from server dataset.");
-      const blob = await res.blob();
-      const loadedFile = new File([blob], f.filename, {
-        type: "application/pdf",
-        lastModified: Date.now(),
-      });
-      processIncomingFiles([loadedFile]);
-    } catch (err: any) {
-      setError(err?.message || "Failed to load document from server dataset.");
-    } finally {
-      setLoadingDatasetFile(null);
-    }
-  };
-
-  const handleLoadConvertedTxt = async (f: DatasetFileItem) => {
-    setLoadingDatasetFile(f.filename);
-    setError(null);
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/dataset/txt/${encodeURIComponent(f.filename)}`);
-      if (!res.ok) throw new Error("Failed to load converted text from server.");
-      const data = await res.json();
-      if (data.pages && onLoadServerPages) {
-        onLoadServerPages(data.pages, f.filename, f.total_pages);
-      }
-    } catch (err: any) {
-      setError(err?.message || "Failed to load converted text.");
-    } finally {
-      setLoadingDatasetFile(null);
-    }
-  };
-
-  const handleDirectPdfToTxt = async (f: DatasetFileItem) => {
-    setConvertingDatasetFile(f.filename);
-    setError(null);
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/dataset/to-txt`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filename: f.filename,
-          mode: processingMode,
-          use_ai: true,
-          save_to_txt: true,
-          save_to_jsonl: true,
-        }),
-      });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => null);
-        throw new Error(errData?.detail || "Server conversion failed.");
-      }
-      const data = await res.json();
-      if (data.pages && onLoadServerPages) {
-        onLoadServerPages(data.pages, f.filename, f.total_pages);
-      }
-      fetchDatasetFiles();
-    } catch (err: any) {
-      setError(err?.message || "Direct conversion error.");
-    } finally {
-      setConvertingDatasetFile(null);
-    }
-  };
-
-  const filteredDatasetFiles = datasetFiles.filter((f) => {
-    if (!datasetSearch.trim()) return true;
-    const q = datasetSearch.toLowerCase();
-    return f.filename.toLowerCase().includes(q) || f.stem.toLowerCase().includes(q);
-  });
-
   return (
     <div className="space-y-4">
       {activeFileList.length === 0 ? (
         <div className="space-y-3">
-          {/* Source Tabs: Upload File vs Fetch from Link vs API Server Dataset */}
+          {/* Source Tabs: Server Store / URL (Default) vs Upload Local File */}
           <div className="flex items-center justify-center space-x-2 pb-1 flex-wrap gap-y-2">
+            <button
+              type="button"
+              onClick={() => setActiveTab("url")}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === "url"
+                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+                  : "bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800"
+              }`}
+            >
+              <LinkIcon className="h-3.5 w-3.5 text-indigo-300" />
+              <span>🌐 Server Store / URL</span>
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 font-bold">
+                Direct ➔ TXT
+              </span>
+            </button>
             <button
               type="button"
               onClick={() => setActiveTab("file")}
@@ -459,43 +494,237 @@ export const FileUpload: React.FC<FileUploadProps> = ({
               }`}
             >
               <FileUp className="h-3.5 w-3.5" />
-              <span>Upload Local Files</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("url")}
-              className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
-                activeTab === "url"
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
-                  : "bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800"
-              }`}
-            >
-              <LinkIcon className="h-3.5 w-3.5" />
-              <span>Import from Link / URL</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab("dataset");
-                if (datasetFiles.length === 0) fetchDatasetFiles();
-              }}
-              className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
-                activeTab === "dataset"
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
-                  : "bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800"
-              }`}
-            >
-              <Database className="h-3.5 w-3.5 text-indigo-400" />
-              <span>API Server Dataset</span>
-              {datasetFiles.length > 0 && (
-                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 font-bold">
-                  {datasetFiles.length}
-                </span>
-              )}
+              <span>📁 Upload Local Files</span>
             </button>
           </div>
 
-          {activeTab === "file" ? (
+          {activeTab === "url" ? (
+            <div className="border border-slate-800 rounded-3xl p-6 sm:p-8 bg-[#0D1322] shadow-2xl space-y-5">
+              <div className="text-center space-y-1.5">
+                <div className="h-12 w-12 mx-auto rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+                  <Zap className="h-6 w-6 text-indigo-400" />
+                </div>
+                <h3 className="text-sm sm:text-base font-bold text-white flex items-center justify-center gap-2">
+                  <span>Server Store PDF Stream (Direct ➔ TXT & JSONL)</span>
+                  <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    Zero Local Download
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-400 max-w-xl mx-auto font-khmer">
+                  បញ្ចូល URL ឯកសារ PDF ពី Server Store របស់អ្នក — API Server នឹងទាញយកមកបំប្លែងផ្ទាល់ (Convert Direct ➔ TXT) ហើយរក្សាទុកក្នុង <code className="text-indigo-300 font-mono">./txt/</code> និង <code className="text-indigo-300 font-mono">./jsonl/</code> ដោយមិនបាច់ Download មកកុំព្យូទ័ររបស់អ្នកឡើយ
+                </p>
+              </div>
+
+              {/* Mode Toggle: Single URL vs Batch Multi-Line URLs */}
+              <div className="flex items-center justify-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setUrlMode("single")}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                    urlMode === "single"
+                      ? "bg-slate-800 text-white border border-indigo-500/50 shadow-md shadow-indigo-500/10"
+                      : "bg-slate-900/60 text-slate-400 hover:text-white border border-slate-800"
+                  }`}
+                >
+                  🔗 Single Server Store URL
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUrlMode("batch")}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                    urlMode === "batch"
+                      ? "bg-slate-800 text-white border border-indigo-500/50 shadow-md shadow-indigo-500/10"
+                      : "bg-slate-900/60 text-slate-400 hover:text-white border border-slate-800"
+                  }`}
+                >
+                  📑 Batch URLs (Multi-line)
+                </button>
+              </div>
+
+              <div className="max-w-xl mx-auto space-y-4">
+                {urlMode === "single" ? (
+                  <>
+                    <div className="relative flex items-center">
+                      <div className="absolute left-4 text-slate-500 pointer-events-none">
+                        <LinkIcon className="h-4 w-4" />
+                      </div>
+                      <input
+                        type="url"
+                        value={urlInput}
+                        onChange={(e) => setUrlInput(e.target.value)}
+                        placeholder="Paste PDF URL from your server store (e.g. http://my-store/file.pdf)..."
+                        disabled={isFetchingUrl || isConvertingUrl || isProcessing}
+                        className="w-full bg-[#070A12] border border-slate-700 rounded-2xl pl-11 pr-8 py-3 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-inner"
+                      />
+                      {urlInput && (
+                        <button
+                          type="button"
+                          onClick={() => setUrlInput("")}
+                          className="absolute right-3 text-slate-500 hover:text-slate-300 text-xs font-bold"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Page Range Selection for Server Conversion */}
+                    <div className="flex items-center justify-between bg-slate-900/60 border border-slate-800/80 rounded-xl px-3.5 py-2 text-xs">
+                      <span className="text-slate-300 font-medium">Page Range (Optional Slice):</span>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-slate-500">From</span>
+                        <input
+                          type="number"
+                          min="1"
+                          value={startInput}
+                          onChange={handleStartInputChange}
+                          onBlur={handleStartInputBlur}
+                          className="w-14 bg-[#070A12] border border-slate-700 rounded-lg px-2 py-1 text-center text-white text-xs font-mono focus:outline-none focus:border-indigo-500"
+                        />
+                        <span className="text-slate-500">To</span>
+                        <input
+                          type="number"
+                          min="1"
+                          placeholder="All"
+                          value={endInput}
+                          onChange={handleEndInputChange}
+                          onBlur={handleEndInputBlur}
+                          className="w-14 bg-[#070A12] border border-slate-700 rounded-lg px-2 py-1 text-center text-white text-xs font-mono focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Primary Dual Actions: Direct Server PDF to TXT vs Load PDF */}
+                    <div className="flex flex-col sm:flex-row items-center gap-2.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={handleConvertUrlToTxt}
+                        disabled={isConvertingUrl || isFetchingUrl || isProcessing || !urlInput.trim()}
+                        className="w-full sm:flex-1 py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2 transition-all cursor-pointer"
+                        title="API Server fetches PDF directly, runs Vision OCR/correction, and saves .txt & .jsonl to disk without browser download"
+                      >
+                        {isConvertingUrl || (isProcessing && activeFileList.length === 0) ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span>Converting PDF ➔ TXT on Server (Streaming)...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="h-4 w-4 text-indigo-200" />
+                            <span>⚡ Convert PDF ➔ TXT (Server Direct)</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleFetchFromUrl}
+                        disabled={isFetchingUrl || isConvertingUrl || isProcessing || !urlInput.trim()}
+                        className="w-full sm:w-auto py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 disabled:opacity-50 text-xs font-semibold flex items-center justify-center space-x-1.5 transition-all cursor-pointer"
+                        title="Load into workspace if you want to inspect thumbnails first"
+                      >
+                        {isFetchingUrl ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            <span>Loading...</span>
+                          </>
+                        ) : (
+                          <>
+                            <FileUp className="h-3.5 w-3.5" />
+                            <span>📄 Load in Workspace</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-300 font-medium">
+                          Paste Server Store PDF URLs (one URL per line):
+                        </span>
+                        {batchUrlsInput.trim() && (
+                          <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                            {
+                              batchUrlsInput
+                                .split("\n")
+                                .map((l) => l.trim())
+                                .filter((l) => l.startsWith("http://") || l.startsWith("https://"))
+                                .length
+                            }{" "}
+                            URLs detected
+                          </span>
+                        )}
+                      </div>
+                      <textarea
+                        rows={4}
+                        value={batchUrlsInput}
+                        onChange={(e) => setBatchUrlsInput(e.target.value)}
+                        placeholder={`http://my-server-store:8000/files/document_01.pdf\nhttps://storage.googleapis.com/bucket/khmer_manual.pdf\nhttp://internal-nas/reports/report_2026.pdf`}
+                        disabled={isProcessingBatch || isProcessing}
+                        className="w-full bg-[#070A12] border border-slate-700 rounded-2xl p-3 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-inner font-mono leading-relaxed resize-y"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleConvertBatchUrlsToTxt}
+                      disabled={isProcessingBatch || isProcessing || !batchUrlsInput.trim()}
+                      className="w-full py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2 transition-all cursor-pointer"
+                    >
+                      {isProcessingBatch ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>Converting Batch URLs ➔ TXT on Server...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="h-4 w-4 text-indigo-200" />
+                          <span>⚡ Convert All URLs ➔ TXT (Batch Direct)</span>
+                        </>
+                      )}
+                    </button>
+                  </>
+                )}
+
+                {/* Architecture explanation */}
+                <div className="p-3 rounded-xl bg-indigo-950/30 border border-indigo-500/20 text-[11px] text-indigo-300 flex items-start space-x-2.5">
+                  <Zap className="h-4 w-4 text-indigo-400 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <p className="font-semibold text-white">Server Direct Pipeline:</p>
+                    <p className="text-slate-400 leading-relaxed">
+                      The API server streams the PDF directly from the URL into RAM, extracts clean Khmer text & LaTeX formulas with Gemini Vision, and writes <code className="font-mono text-indigo-200">./txt/{`{stem}`}.txt</code> and <code className="font-mono text-indigo-200">./jsonl/{`{stem}`}.jsonl</code> directly on the server disk. Zero client download needed!
+                    </p>
+                  </div>
+                </div>
+
+                {/* Quick 1-Click Samples for Testing */}
+                <div className="flex flex-wrap items-center justify-center gap-2 pt-0.5 text-xs">
+                  <span className="text-[11px] text-slate-500 font-medium">Quick Test:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUrlMode("single");
+                      setUrlInput("http://localhost:8000/api/dataset/file/1787540635_Binder1.pdf");
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 text-[11px] transition-colors"
+                  >
+                    🧪 Local Server Store PDF (Binder1)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUrlMode("single");
+                      setUrlInput("https://mosvy.gov.kh/wp-content/uploads/2021/11/02-Prakas-on-CTP-PF-Implementation.pdf");
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 text-[11px] transition-colors"
+                  >
+                    📜 Remote MoSVY PDF
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
             <div
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
@@ -535,249 +764,6 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                   <span className="px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700 font-medium">Hybrid Merged / Batch</span>
                 </div>
               </div>
-            </div>
-          ) : activeTab === "url" ? (
-            <div className="border border-slate-800 rounded-3xl p-6 sm:p-8 bg-[#0D1322] shadow-2xl space-y-5">
-              <div className="text-center space-y-1.5">
-                <div className="h-12 w-12 mx-auto rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
-                  <LinkIcon className="h-6 w-6" />
-                </div>
-                <h3 className="text-sm sm:text-base font-bold text-white">
-                  Import PDF or Image from Link
-                </h3>
-                <p className="text-xs text-slate-400 max-w-lg mx-auto font-khmer">
-                  បញ្ចូលតំណភ្ជាប់ (Google Drive, Dropbox ឬ Direct Link) នៃឯកសារ PDF ឬរូបភាពដើម្បីទាញយកដោយស្វ័យប្រវត្តិ
-                </p>
-              </div>
-
-              <form onSubmit={handleFetchFromUrl} className="max-w-xl mx-auto space-y-3">
-                <div className="relative flex items-center">
-                  <div className="absolute left-4 text-slate-500 pointer-events-none">
-                    <LinkIcon className="h-4 w-4" />
-                  </div>
-                  <input
-                    type="url"
-                    value={urlInput}
-                    onChange={(e) => setUrlInput(e.target.value)}
-                    placeholder="https://drive.google.com/... or https://example.com/document.pdf"
-                    disabled={isFetchingUrl}
-                    className="w-full bg-[#070A12] border border-slate-700 rounded-2xl pl-11 pr-32 py-3 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-inner"
-                  />
-                  <button
-                    type="submit"
-                    disabled={isFetchingUrl || !urlInput.trim()}
-                    className="absolute right-2 px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold shadow-md shadow-indigo-600/30 flex items-center space-x-1.5 transition-all"
-                  >
-                    {isFetchingUrl ? (
-                      <>
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        <span>Downloading...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Download className="h-3.5 w-3.5" />
-                        <span>Fetch & Import</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] text-slate-500 pt-1">
-                  <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">
-                    📄 Direct PDF URL
-                  </span>
-                  <span>•</span>
-                  <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">
-                    🖼️ Image Link (PNG, JPG)
-                  </span>
-                  <span>•</span>
-                  <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800">
-                    📁 Google Drive / Dropbox
-                  </span>
-                </div>
-
-                {/* Quick 1-Click Samples for Testing */}
-                <div className="flex flex-wrap items-center justify-center gap-2 pt-1 text-xs">
-                  <span className="text-[11px] text-slate-500 font-medium">Quick Test:</span>
-                  <button
-                    type="button"
-                    onClick={() => setUrlInput("https://mosvy.gov.kh/wp-content/uploads/2021/11/02-Prakas-on-CTP-PF-Implementation.pdf")}
-                    className="px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 text-[11px] transition-colors"
-                  >
-                    📜 MoSVY PDF Prakas
-                  </button>
-                </div>
-              </form>
-            </div>
-          ) : (
-            <div className="border border-slate-800 rounded-3xl p-5 sm:p-7 bg-[#0D1322] shadow-2xl space-y-4">
-              {/* Dataset Header */}
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <Database className="h-5 w-5 text-indigo-400" />
-                    <h3 className="text-sm sm:text-base font-bold text-white">
-                      API Server PDF Dataset
-                    </h3>
-                    <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                      {datasetFiles.length} PDFs in ./pdf
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-400 font-khmer pt-1">
-                    ឯកសារ PDF ក្នុង Folder <code className="text-indigo-300 font-mono">./pdf</code> — ចុច Load ដើម្បីផ្ទុកចូលកម្មវិធី ឬចុច PDF ➔ TXT ដើម្បីបំប្លែងលើ Server ដោយផ្ទាល់
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={fetchDatasetFiles}
-                  disabled={isLoadingDataset}
-                  className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-semibold transition-all shrink-0"
-                >
-                  <RefreshCw className={`h-3.5 w-3.5 ${isLoadingDataset ? "animate-spin text-indigo-400" : ""}`} />
-                  <span>Refresh List</span>
-                </button>
-              </div>
-
-              {/* Search & Statistics Bar */}
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={datasetSearch}
-                    onChange={(e) => setDatasetSearch(e.target.value)}
-                    placeholder="Search documents (sample_khmer, ccc, ព្រឹត្តិបត្រ, រកម, អនុក្រឹត្យ)..."
-                    className="w-full bg-[#070A12] border border-slate-700/80 rounded-xl pl-9 pr-8 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 shadow-inner font-khmer"
-                  />
-                  {datasetSearch && (
-                    <button
-                      type="button"
-                      onClick={() => setDatasetSearch("")}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs"
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex items-center space-x-2 text-[11px] text-slate-400 shrink-0">
-                  <span className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 font-medium">
-                    Showing {filteredDatasetFiles.length} of {datasetFiles.length} files
-                  </span>
-                </div>
-              </div>
-
-              {/* Document List */}
-              {isLoadingDataset && datasetFiles.length === 0 ? (
-                <div className="py-12 text-center text-slate-400 space-y-2">
-                  <Loader2 className="h-6 w-6 animate-spin mx-auto text-indigo-400" />
-                  <p className="text-xs">Scanning ./pdf directory on API server...</p>
-                </div>
-              ) : filteredDatasetFiles.length === 0 ? (
-                <div className="py-10 text-center text-slate-500 text-xs border border-dashed border-slate-800 rounded-2xl">
-                  {datasetSearch ? `No PDF files matching "${datasetSearch}".` : "No PDF files found in server ./pdf directory."}
-                </div>
-              ) : (
-                <div className="max-h-[380px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                  {filteredDatasetFiles.map((file) => (
-                    <div
-                      key={file.filename}
-                      className="flex flex-col md:flex-row items-start md:items-center justify-between p-3.5 rounded-2xl bg-slate-900/60 hover:bg-slate-900/90 border border-slate-800 hover:border-indigo-500/40 transition-all gap-3 group"
-                    >
-                      {/* Left: Info */}
-                      <div className="flex items-center space-x-3 overflow-hidden min-w-0">
-                        <div className="h-10 w-10 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 shrink-0 group-hover:bg-rose-500/20 transition-colors">
-                          <FileText className="h-5 w-5" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-xs sm:text-sm font-semibold text-white truncate font-khmer group-hover:text-indigo-300 transition-colors">
-                            {file.filename}
-                          </div>
-                          <div className="flex items-center space-x-2 text-[11px] text-slate-400 pt-0.5 flex-wrap">
-                            <span className="text-slate-300 font-medium">{file.size_human}</span>
-                            <span>•</span>
-                            <span className="text-indigo-300 font-medium">{file.total_pages} Pages</span>
-                            {file.has_txt && (
-                              <>
-                                <span>•</span>
-                                <span className="text-emerald-400 font-medium flex items-center space-x-1">
-                                  <CheckCircle2 className="h-3 w-3 inline text-emerald-400" />
-                                  <span>TXT Ready ({file.txt_size_human})</span>
-                                </span>
-                              </>
-                            )}
-                            {file.has_jsonl && (
-                              <>
-                                <span>•</span>
-                                <span className="text-cyan-400 font-medium">JSONL Ready</span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Right: Actions */}
-                      <div className="flex items-center space-x-2 shrink-0 self-end md:self-center">
-                        {/* View Converted TXT if exists */}
-                        {file.has_txt && (
-                          <button
-                            type="button"
-                            onClick={() => handleLoadConvertedTxt(file)}
-                            disabled={loadingDatasetFile === file.filename || convertingDatasetFile === file.filename}
-                            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-xs font-semibold transition-all shadow-sm disabled:opacity-50"
-                            title="Directly load converted text pages from server ./txt folder into workspace"
-                          >
-                            {loadingDatasetFile === file.filename ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <FileCheck className="h-3.5 w-3.5" />
-                            )}
-                            <span>View TXT</span>
-                          </button>
-                        )}
-
-                        {/* Load PDF in Workspace */}
-                        <button
-                          type="button"
-                          onClick={() => handleLoadDatasetFile(file)}
-                          disabled={loadingDatasetFile === file.filename || convertingDatasetFile === file.filename}
-                          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 text-xs font-semibold transition-all disabled:opacity-50"
-                          title="Load this PDF into workspace for page-by-page OCR or viewing"
-                        >
-                          {loadingDatasetFile === file.filename ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <FileUp className="h-3.5 w-3.5" />
-                          )}
-                          <span>Load PDF</span>
-                        </button>
-
-                        {/* Direct PDF ➔ TXT Conversion on Server */}
-                        <button
-                          type="button"
-                          onClick={() => handleDirectPdfToTxt(file)}
-                          disabled={convertingDatasetFile === file.filename || loadingDatasetFile === file.filename}
-                          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/30 transition-all disabled:opacity-50"
-                          title="Convert PDF to text directly on API server and save to ./txt & ./jsonl"
-                        >
-                          {convertingDatasetFile === file.filename ? (
-                            <>
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              <span>Converting...</span>
-                            </>
-                          ) : (
-                            <>
-                              <Sparkles className="h-3.5 w-3.5" />
-                              <span>PDF ➔ TXT</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           )}
 
@@ -849,19 +835,6 @@ export const FileUpload: React.FC<FileUploadProps> = ({
 
               {!isProcessing && (
                 <div className="flex items-center space-x-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (onClearFile) onClearFile();
-                      setActiveTab("dataset");
-                      fetchDatasetFiles();
-                    }}
-                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs text-indigo-300 hover:text-white bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-500/30 transition-colors"
-                    title="Browse and load documents from server dataset folder"
-                  >
-                    <Database className="h-3.5 w-3.5 text-indigo-400" />
-                    <span>Server Dataset</span>
-                  </button>
                   <button
                     type="button"
                     onClick={() => {

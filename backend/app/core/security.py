@@ -53,11 +53,20 @@ def is_safe_url(url_str: str) -> Tuple[bool, str]:
 
         hostname_lower = hostname.lower().strip(".")
 
-        # 2. Block known sensitive hostnames
-        if hostname_lower in BLOCKED_HOSTNAMES:
-            return False, f"Access to '{hostname}' is blocked for security."
+        from app.core.config import settings
+        allow_local = getattr(settings, "ALLOW_LOCAL_STORAGE_URLS", True)
 
-        # 3. DNS resolution & IP check to prevent DNS rebinding and private IP access
+        # Cloud metadata endpoints are always blocked
+        cloud_metadata = [
+            ipaddress.ip_network("169.254.0.0/16"),
+            ipaddress.ip_network("100.64.0.0/10"),
+        ]
+
+        if not allow_local:
+            if hostname_lower in BLOCKED_HOSTNAMES:
+                return False, f"Access to '{hostname}' is blocked for security."
+
+        # 3. DNS resolution & IP check
         try:
             addr_info = socket.getaddrinfo(hostname, None)
         except socket.gaierror:
@@ -67,9 +76,16 @@ def is_safe_url(url_str: str) -> Tuple[bool, str]:
             ip_str = sockaddr[0]
             try:
                 ip = ipaddress.ip_address(ip_str)
-                for network in BLOCKED_NETWORKS:
+                # Always block cloud metadata
+                for network in cloud_metadata:
                     if ip in network:
-                        return False, f"Access to IP address '{ip_str}' is restricted."
+                        return False, f"Access to cloud metadata IP '{ip_str}' is restricted."
+                
+                # If local server store is not allowed, block all private networks
+                if not allow_local:
+                    for network in BLOCKED_NETWORKS:
+                        if ip in network:
+                            return False, f"Access to IP address '{ip_str}' is restricted."
             except ValueError:
                 return False, "Invalid IP address encountered during DNS resolution."
 

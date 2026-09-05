@@ -22,6 +22,7 @@ class Settings:
     ]
     MAX_UPLOAD_SIZE_MB: int = int(os.environ.get("MAX_UPLOAD_SIZE_MB", 100))
     ENABLE_DOCS: bool = os.environ.get("ENABLE_DOCS", "false").lower() in ("true", "1")
+    ALLOW_LOCAL_STORAGE_URLS: bool = os.environ.get("ALLOW_LOCAL_STORAGE_URLS", "true").lower() in ("true", "1")
 
     # AI Keys & URLs
     DEFAULT_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")
