@@ -11,23 +11,31 @@ except ImportError:
 
 class PDFService:
     @classmethod
-    def create_document_from_files_data(cls, files_data: List[Tuple[str, bytes]]) -> fitz.Document:
+    def create_document_with_file_map(
+        cls, files_data: List[Tuple[str, bytes]]
+    ) -> Tuple[fitz.Document, List[Dict[str, Any]], Dict[int, Dict[str, Any]]]:
         """
-        Creates a unified fitz.Document from one or more uploaded files (PDFs and/or images).
-        If multiple images/PDFs are provided, merges them sequentially into pages 1..N.
+        Creates a unified fitz.Document and tracks:
+        1. files_summary: List of file metadata dicts with page counts and offsets
+        2. page_to_file: Mapping of 1-indexed global page_number -> {"file_name": str, "doc_page_number": int}
         """
         if not files_data:
             raise ValueError("No files provided.")
 
-        if len(files_data) == 1 and files_data[0][0].lower().endswith(".pdf"):
-            return fitz.open(stream=files_data[0][1], filetype="pdf")
-
         combined = fitz.open()
+        files_summary: List[Dict[str, Any]] = []
+        page_to_file: Dict[int, Dict[str, Any]] = {}
+        current_global_page = 1
+
         for fname, fbytes in files_data:
             ext = fname.lower().split(".")[-1] if "." in fname else "png"
+            file_start_page = current_global_page
+            pages_in_file = 0
+
             if ext == "pdf":
                 try:
                     sub_doc = fitz.open(stream=fbytes, filetype="pdf")
+                    pages_in_file = len(sub_doc)
                     combined.insert_pdf(sub_doc)
                     sub_doc.close()
                 except Exception as e:
@@ -45,12 +53,38 @@ class PDFService:
                     page = combined.new_page(width=rect.width, height=rect.height)
                     page.insert_image(rect, stream=fbytes)
                     img_sub.close()
+                    pages_in_file = 1
                 except Exception as e:
                     print(f"Error inserting image {fname}: {e}")
 
+            if pages_in_file > 0:
+                for doc_p in range(1, pages_in_file + 1):
+                    page_to_file[current_global_page] = {
+                        "file_name": fname,
+                        "doc_page_number": doc_p
+                    }
+                    current_global_page += 1
+
+                files_summary.append({
+                    "filename": fname,
+                    "pages": pages_in_file,
+                    "start_page": file_start_page,
+                    "end_page": current_global_page - 1,
+                    "size_bytes": len(fbytes)
+                })
+
         if len(combined) == 0:
             raise ValueError("Could not extract any valid pages from uploaded file(s).")
-        return combined
+        return combined, files_summary, page_to_file
+
+    @classmethod
+    def create_document_from_files_data(cls, files_data: List[Tuple[str, bytes]]) -> fitz.Document:
+        """
+        Creates a unified fitz.Document from one or more uploaded files (PDFs and/or images).
+        If multiple images/PDFs are provided, merges them sequentially into pages 1..N.
+        """
+        doc, _, _ = cls.create_document_with_file_map(files_data)
+        return doc
 
     @staticmethod
     def get_document_from_bytes(file_bytes: bytes, filename: str = "") -> fitz.Document:
@@ -197,7 +231,7 @@ class PDFService:
         Extracts text, metadata, and optional thumbnails from one or multiple PDF / Image files.
         Supports slicing by start_page and end_page (1-indexed).
         """
-        doc = cls.create_document_from_files_data(files_data)
+        doc, files_summary, page_to_file = cls.create_document_with_file_map(files_data)
         total_pages = len(doc)
         
         start_idx = max(0, start_page - 1)
@@ -209,9 +243,12 @@ class PDFService:
             r"(=|\+|-|\/|\*|\^|\\sqrt|\\frac|[0-9]+[a-zA-Z]|[a-zA-Z][0-9]+|[\u2200-\u22FF]|[\u0370-\u03FF])"
         )
         
+        first_fname = files_data[0][0] if files_data else "document"
+
         for i in range(start_idx, end_idx):
             page = doc[i]
             page_num = i + 1
+            file_info = page_to_file.get(page_num, {"file_name": first_fname, "doc_page_number": page_num})
             text = page.get_text("text").strip()
             has_formulas = bool(math_indicators.search(text))
             render_thumb = include_thumbnails and (i - start_idx < 5 or (end_idx - start_idx) <= 5)
@@ -219,6 +256,8 @@ class PDFService:
 
             pages_data.append({
                 "page_number": page_num,
+                "file_name": file_info["file_name"],
+                "doc_page_number": file_info["doc_page_number"],
                 "raw_text": text,
                 "char_count": len(text),
                 "word_count": len(text.split()),
@@ -226,9 +265,19 @@ class PDFService:
                 "thumbnail": thumbnail
             })
             
-        first_fname = files_data[0][0] if files_data else "document"
+        if len(files_data) == 1:
+            title_fallback = first_fname
+        else:
+            pdf_count = sum(1 for f in files_data if f[0].lower().endswith(".pdf"))
+            if pdf_count == len(files_data):
+                title_fallback = f"{len(files_data)} PDF Documents ({first_fname} ...)"
+            elif pdf_count == 0:
+                title_fallback = f"{len(files_data)} Merged Images"
+            else:
+                title_fallback = f"{len(files_data)} Merged Files"
+
         metadata = {
-            "title": doc.metadata.get("title") or (first_fname if len(files_data) == 1 else f"{len(files_data)} Merged Images"),
+            "title": doc.metadata.get("title") or title_fallback,
             "author": doc.metadata.get("author") or "Unknown",
             "subject": doc.metadata.get("subject") or "",
             "total_pages": total_pages,
@@ -241,6 +290,7 @@ class PDFService:
         return {
             "total_pages": total_pages,
             "selected_count": len(pages_data),
+            "files": files_summary,
             "metadata": metadata,
             "pages": pages_data
         }

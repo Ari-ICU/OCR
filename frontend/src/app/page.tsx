@@ -14,7 +14,10 @@ import {
   Sparkles,
   BookOpen,
   Terminal,
+  Files,
+  FileText,
 } from "lucide-react";
+import { FileBreakdownItem } from "../components/FileUpload";
 import { detectKhmerErrors } from "../utils/khmerValidator";
 
 import {
@@ -39,6 +42,9 @@ export default function Home() {
   // PDF & Multi-Image processing state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [multiPdfMode, setMultiPdfMode] = useState<"merged" | "batch">("merged");
+  const [filesBreakdown, setFilesBreakdown] = useState<FileBreakdownItem[]>([]);
+  const [selectedDocFilter, setSelectedDocFilter] = useState<string>("all");
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [totalPages, setTotalPages] = useState<number>(0);
   const [totalPdfDocPages, setTotalPdfDocPages] = useState<number>(0);
@@ -183,15 +189,21 @@ export default function Home() {
     // Restore PDF session from IndexedDB so refreshing keeps all work intact!
     async function restoreSession() {
       try {
-        const { session, file } = await loadPersistedSession();
+        const { session, file, files } = await loadPersistedSession();
         if (session) {
-          if (file && file.size > 0) {
-            setSelectedFile(file);
-            setSelectedFiles([file]);
+          const restoredList = files && files.length > 0 ? files : file ? [file] : [];
+          if (restoredList.length > 0) {
+            setSelectedFiles(restoredList);
+            setSelectedFile(restoredList[0]);
           } else {
             setSelectedFile(null);
             setSelectedFiles([]);
           }
+
+          if (session.multiPdfMode) {
+            setMultiPdfMode(session.multiPdfMode);
+          }
+
           if (session.pages && session.pages.length > 0) {
             const sanitizedPages = session.pages.map((p) => ({
               ...p,
@@ -207,7 +219,7 @@ export default function Home() {
           setProcessingMode("vision");
           try { localStorage.setItem("khmerpdf_processing_mode", "vision"); } catch {}
           if (session.concurrency) setConcurrency(Math.min(2, Math.max(1, session.concurrency)));
-          if (file || (session.pages && session.pages.length > 0)) {
+          if (restoredList.length > 0 || (session.pages && session.pages.length > 0)) {
             setSessionRestored(true);
           }
         }
@@ -232,14 +244,32 @@ export default function Home() {
         }
       } catch {}
     }
-    if (selectedFile) {
-      persistActiveSession(selectedFile, pages, {
+    const currentList = selectedFiles.length > 0 ? selectedFiles : selectedFile ? [selectedFile] : [];
+    if (currentList.length > 0) {
+      persistActiveSession(currentList, pages, {
         totalPdfDocPages,
         totalPages,
         startPage,
         endPage,
         processingMode: "vision",
         concurrency,
+        multiPdfMode,
+      });
+    }
+  };
+
+  const handleSetMultiPdfMode = (mode: "merged" | "batch") => {
+    setMultiPdfMode(mode);
+    const currentList = selectedFiles.length > 0 ? selectedFiles : selectedFile ? [selectedFile] : [];
+    if (currentList.length > 0) {
+      persistActiveSession(currentList, pages, {
+        totalPdfDocPages,
+        totalPages,
+        startPage,
+        endPage,
+        processingMode,
+        concurrency,
+        multiPdfMode: mode,
       });
     }
   };
@@ -329,8 +359,7 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [checkBackendHealth]);
 
-  // When a file is selected, fetch lightweight preview immediately and persist session
-  // When files are selected (single PDF or multiple images), fetch preview and persist session
+  // When files are selected (multiple PDFs or images), fetch preview and persist session
   const handleFilesSelected = async (files: File[]) => {
     if (!files || files.length === 0) return;
 
@@ -351,6 +380,7 @@ export default function Home() {
     setErrorMessage(null);
     setStartPage(1);
     setSessionRestored(false);
+    setSelectedDocFilter("all");
 
     const formData = new FormData();
     for (const f of files) {
@@ -366,6 +396,9 @@ export default function Home() {
       if (res.ok) {
         const data = await res.json();
         docTotal = data.total_pages || files.length;
+        if (data.files && Array.isArray(data.files)) {
+          setFilesBreakdown(data.files);
+        }
         setTotalPdfDocPages(docTotal);
         setEndPage(docTotal);
       } else {
@@ -375,14 +408,33 @@ export default function Home() {
       console.warn("Preview load error", err);
       setEndPage(files.length);
     } finally {
-      persistActiveSession(files[0], [], {
+      persistActiveSession(files, [], {
         totalPdfDocPages: docTotal,
         totalPages: 0,
         startPage: 1,
         endPage: docTotal,
         processingMode,
         concurrency,
+        multiPdfMode,
       });
+    }
+  };
+
+  const handleAddFiles = (newFiles: File[]) => {
+    if (!newFiles || newFiles.length === 0) return;
+    const existingNames = new Set(selectedFiles.map((f) => f.name));
+    const uniqueNew = newFiles.filter((f) => !existingNames.has(f.name));
+    if (uniqueNew.length === 0) return;
+    const combined = [...selectedFiles, ...uniqueNew];
+    handleFilesSelected(combined);
+  };
+
+  const handleRemoveFile = (index: number) => {
+    const updated = selectedFiles.filter((_, i) => i !== index);
+    if (updated.length === 0) {
+      handleClearAllSession();
+    } else {
+      handleFilesSelected(updated);
     }
   };
 
@@ -398,15 +450,17 @@ export default function Home() {
     setPages([]);
     setTotalPages(0);
     setStartPage(1);
-    setEndPage(2);
-    if (selectedFile) {
-      persistActiveSession(selectedFile, [], {
+    setEndPage(totalPdfDocPages || 2);
+    const currentList = selectedFiles.length > 0 ? selectedFiles : selectedFile ? [selectedFile] : [];
+    if (currentList.length > 0) {
+      persistActiveSession(currentList, [], {
         totalPdfDocPages,
         totalPages: 0,
         startPage: 1,
-        endPage: 2,
+        endPage: totalPdfDocPages || 2,
         processingMode,
         concurrency,
+        multiPdfMode,
       });
     }
   };
@@ -422,6 +476,8 @@ export default function Home() {
 
     setSelectedFile(null);
     setSelectedFiles([]);
+    setFilesBreakdown([]);
+    setSelectedDocFilter("all");
     setPages([]);
     setTotalPages(0);
     setTotalPdfDocPages(0);
@@ -527,10 +583,15 @@ export default function Home() {
             if (eventType === "init") {
               const docTotal = data.doc_total_pages || data.total_pages || 0;
               setTotalPdfDocPages(docTotal);
+              if (data.files && Array.isArray(data.files)) {
+                setFilesBreakdown(data.files);
+              }
 
               const incomingOverview: PageResult[] = (data.pages_overview || []).map(
                 (p: any) => ({
                   page_number: p.page_number,
+                  file_name: p.file_name || "",
+                  doc_page_number: p.doc_page_number || p.page_number,
                   raw_text: p.raw_text || "",
                   corrected_text: "",
                   model_used: "",
@@ -556,6 +617,8 @@ export default function Home() {
                     const existing = pageMap.get(p.page_number)!;
                     pageMap.set(p.page_number, {
                       ...existing,
+                      file_name: p.file_name || existing.file_name,
+                      doc_page_number: p.doc_page_number || existing.doc_page_number,
                       thumbnail: p.thumbnail || existing.thumbnail,
                       raw_text: p.raw_text || existing.raw_text,
                       isProcessing: false
@@ -576,12 +639,20 @@ export default function Home() {
                 if (exists) {
                   return prev.map((p) =>
                     p.page_number === data.page_number
-                      ? { ...p, raw_text: data.raw_text || p.raw_text, isProcessing: true }
+                      ? {
+                          ...p,
+                          raw_text: data.raw_text || p.raw_text,
+                          file_name: data.file_name || p.file_name,
+                          doc_page_number: data.doc_page_number || p.doc_page_number,
+                          isProcessing: true,
+                        }
                       : p
                   );
                 } else {
                   const newP: PageResult = {
                     page_number: data.page_number,
+                    file_name: data.file_name || "",
+                    doc_page_number: data.doc_page_number || data.page_number,
                     raw_text: data.raw_text || "",
                     corrected_text: "",
                     model_used: "",
@@ -607,6 +678,8 @@ export default function Home() {
                       ? {
                         ...p,
                         page_number: data.page_number,
+                        file_name: data.file_name || p.file_name,
+                        doc_page_number: data.doc_page_number || p.doc_page_number,
                         raw_text: data.raw_text || p.raw_text,
                         corrected_text: data.already_completed ? p.corrected_text : (data.corrected_text ?? p.corrected_text),
                         model_used: data.already_completed ? p.model_used : (data.model_used ?? p.model_used),
@@ -623,6 +696,8 @@ export default function Home() {
                 } else {
                   const newP: PageResult = {
                     page_number: data.page_number,
+                    file_name: data.file_name || "",
+                    doc_page_number: data.doc_page_number || data.page_number,
                     raw_text: data.raw_text || "",
                     corrected_text: data.corrected_text,
                     model_used: data.model_used,
@@ -868,9 +943,33 @@ export default function Home() {
     }
   };
 
+  // Distinct list of documents in the session
+  const distinctDocuments = useMemo(() => {
+    const list: string[] = [];
+    const set = new Set<string>();
+    selectedFiles.forEach((f) => {
+      if (!set.has(f.name)) {
+        set.add(f.name);
+        list.push(f.name);
+      }
+    });
+    pages.forEach((p) => {
+      if (p.file_name && !set.has(p.file_name)) {
+        set.add(p.file_name);
+        list.push(p.file_name);
+      }
+    });
+    return list;
+  }, [selectedFiles, pages]);
+
   // Filter and search pages
   const filteredPages = useMemo(() => {
     return pages.filter((p) => {
+      // In batch mode, if a specific document is selected, isolate its pages
+      if (multiPdfMode === "batch" && selectedDocFilter !== "all") {
+        if (p.file_name && p.file_name !== selectedDocFilter) return false;
+      }
+
       if (filterStatus === "completed" && !p.corrected_text) return false;
       if (filterStatus === "formulas" && !p.has_formulas) return false;
 
@@ -883,7 +982,7 @@ export default function Home() {
 
       return true;
     });
-  }, [pages, filterStatus, searchQuery]);
+  }, [pages, filterStatus, searchQuery, multiPdfMode, selectedDocFilter]);
 
   const completedPagesCount = pages.filter((p) => !!p.corrected_text).length;
   const existingPageNumbers = useMemo(() => pages.map(p => p.page_number), [pages]);
@@ -928,22 +1027,27 @@ export default function Home() {
           <div className="text-center space-y-3 max-w-3xl mx-auto">
             <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-slate-300 text-xs font-medium">
               <Sparkles className="h-3.5 w-3.5 text-indigo-400" />
-              <span>Vision OCR (VLM) • 100% Khmer Subscripts (ជើង) • LaTeX Formulas ($...$)</span>
+              <span>Vision OCR (VLM) • Multiple PDF Upload • 100% Khmer Subscripts (ជើង) • LaTeX Formulas ($...$)</span>
             </div>
             <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white leading-tight">
               Convert Khmer PDFs to Clean Text & LaTeX
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 font-khmer max-w-2xl mx-auto leading-relaxed">
-              បំប្លែងឯកសារ PDF ភាសាខ្មែរ ទៅជាអត្ថបទស្អាត ត្រឹមត្រូវតាមស្ដង់ដារយូនីកូដ (Consonant + Subscript ជើង + Vowel + Signs) ព្រមទាំងរក្សារូបមន្តគណិតវិទ្យា/រូបវិទ្យាជាទម្រង់ LaTeX 100%
+              បំប្លែងឯកសារ PDF ភាសាខ្មែរច្រើនសន្លឹក ទៅជាអត្ថបទស្អាត ត្រឹមត្រូវតាមស្ដង់ដារយូនីកូដ (Consonant + Subscript ជើង + Vowel + Signs) ព្រមទាំងរក្សារូបមន្តគណិតវិទ្យា/រូបវិទ្យាជាទម្រង់ LaTeX 100%
             </p>
           </div>
 
-          {/* File Upload Area */}
+          {/* File Upload Area with Multi-PDF & Hybrid Mode */}
           <FileUpload
             onFilesSelected={handleFilesSelected}
             onFileSelected={(file) => handleFilesSelected([file])}
+            onAddFiles={handleAddFiles}
+            onRemoveFile={handleRemoveFile}
             selectedFile={selectedFile}
             selectedFiles={selectedFiles}
+            filesBreakdown={filesBreakdown}
+            multiPdfMode={multiPdfMode}
+            setMultiPdfMode={handleSetMultiPdfMode}
             onClearFile={handleClearAllSession}
             isProcessing={isProcessing}
             onStartProcessing={handleStartProcessing}
@@ -1002,13 +1106,91 @@ export default function Home() {
               setFilterStatus={setFilterStatus}
               searchQuery={searchQuery}
               setSearchQuery={setSearchQuery}
+              multiPdfMode={multiPdfMode}
+              activeDocumentFilter={selectedDocFilter}
+              documentsList={distinctDocuments}
             />
+          )}
+
+          {/* Multi-Document Filter Tabs (When multiple documents are loaded) */}
+          {distinctDocuments.length > 1 && (
+            <div className="bg-[#0D1322] border border-slate-800 rounded-2xl p-4 space-y-3 shadow-xl">
+              <div className="flex items-center justify-between flex-wrap gap-2 text-xs">
+                <div className="flex items-center space-x-2 text-slate-200 font-semibold">
+                  <Files className="h-4 w-4 text-indigo-400" />
+                  <span>
+                    Document Tabs ({distinctDocuments.length} Documents)
+                  </span>
+                  {multiPdfMode === "batch" ? (
+                    <span className="text-[11px] text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/25 font-mono">
+                      Batch Queue Active
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-indigo-300 bg-indigo-500/10 px-2 py-0.5 rounded-md border border-indigo-500/25 font-mono">
+                      Merged Document
+                    </span>
+                  )}
+                </div>
+                <span className="text-[11px] text-slate-400 font-khmer">
+                  ចុចលើឈ្មោះឯកសារដើម្បីច្រោះមើលទំព័រ និងវឌ្ឍនភាព (Click to filter pages)
+                </span>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedDocFilter("all")}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
+                    selectedDocFilter === "all"
+                      ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+                      : "bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800"
+                  }`}
+                >
+                  All Documents ({pages.length} Pages)
+                </button>
+
+                {distinctDocuments.map((docName) => {
+                  const docPages = pages.filter((p) => p.file_name === docName);
+                  const doneCount = docPages.filter((p) => Boolean(p.corrected_text)).length;
+                  const totalDocCount = docPages.length || filesBreakdown.find((b) => b.filename === docName)?.pages || 0;
+                  const isAllDone = totalDocCount > 0 && doneCount === totalDocCount;
+                  const isSelected = selectedDocFilter === docName;
+
+                  return (
+                    <button
+                      key={docName}
+                      type="button"
+                      onClick={() => setSelectedDocFilter(docName)}
+                      className={`flex items-center space-x-2 px-3 py-2 rounded-xl text-xs font-mono transition-all ${
+                        isSelected
+                          ? "bg-indigo-600 text-white font-semibold shadow-lg shadow-indigo-600/30"
+                          : "bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800"
+                      }`}
+                    >
+                      <FileText className="h-3.5 w-3.5 text-rose-400 shrink-0" />
+                      <span className="truncate max-w-[160px] sm:max-w-[200px]" title={docName}>
+                        {docName}
+                      </span>
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded-md font-sans font-bold ${
+                          isAllDone
+                            ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                            : "bg-slate-800 text-slate-400 border border-slate-700/60"
+                        }`}
+                      >
+                        {doneCount}/{totalDocCount}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           )}
 
           {/* Page Grid Jump Navigator */}
           {pages.length > 1 && (
             <PageGridNavigator
-              pages={pages}
+              pages={filteredPages}
               onSelectPage={handleScrollToPage}
               onRetryFailedPages={handleReprocessAllFailedPages}
               onRetryRedLineErrors={handleReprocessRedLineErrors}

@@ -21,7 +21,8 @@ import {
   Maximize2,
   AlertCircle,
   CheckCircle2,
-  Zap
+  Zap,
+  FileText
 } from "lucide-react";
 import { MathRenderer } from "./MathRenderer";
 import { detectKhmerErrors } from "../utils/khmerValidator";
@@ -42,6 +43,8 @@ export interface PageResult {
   thumbnail?: string;
   is_blank?: boolean;
   is_english_skipped?: boolean;
+  file_name?: string;
+  doc_page_number?: number;
 }
 
 interface PageCardProps {
@@ -105,44 +108,62 @@ export const PageCard: React.FC<PageCardProps> = ({
         id={`page-card-${page.page_number}`}
         className="bg-[#0D1322] border border-slate-800 rounded-2xl overflow-hidden shadow-xl transition-all duration-200 hover:border-slate-700/80"
       >
-        {/* Card Header */}
-        <div className="px-4 sm:px-5 py-3.5 bg-[#0A0E1A] border-b border-slate-800 flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center space-x-2.5 sm:space-x-3 flex-wrap gap-y-1">
-            <span className="flex items-center justify-center h-7 w-7 rounded-lg bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-xs font-bold font-mono">
+        {/* Card Header (Click anywhere to expand/collapse) */}
+        <div
+          onClick={handleToggle}
+          className="px-4 sm:px-5 py-3 bg-[#0A0E1A] hover:bg-[#0F1424] border-b border-slate-800 flex items-center justify-between gap-3 cursor-pointer select-none transition-colors group"
+          title={isOpen ? "Click anywhere on header to collapse page" : "Click anywhere on header to expand page"}
+        >
+          {/* Left Metadata */}
+          <div className="flex items-center space-x-2 sm:space-x-2.5 min-w-0 flex-wrap sm:flex-nowrap gap-y-1">
+            <span className="flex items-center justify-center h-6 w-6 rounded-md bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-xs font-bold font-mono group-hover:border-indigo-400/50 transition-colors shrink-0">
               {page.page_number}
             </span>
-            <h4 className="text-sm font-semibold text-white font-khmer">
-              ទំព័រទី {page.page_number} <span className="font-sans text-xs text-slate-400 font-normal">(Page {page.page_number})</span>
+            <h4 className="text-xs sm:text-sm font-semibold text-white font-khmer group-hover:text-indigo-200 transition-colors shrink-0">
+              ទំព័រទី {page.page_number} <span className="font-sans text-[11px] text-slate-400 font-normal hidden sm:inline">(Page {page.page_number})</span>
             </h4>
 
+            {page.file_name && (
+              <span
+                className="inline-flex items-center space-x-1 text-[11px] text-indigo-300 bg-indigo-950/70 border border-indigo-500/30 px-2 py-0.5 rounded-md font-mono shrink"
+                title={`Document: ${page.file_name}${page.doc_page_number ? ` • Page ${page.doc_page_number}` : ""}`}
+              >
+                <FileText className="h-3 w-3 text-indigo-400 shrink-0" />
+                <span className="max-w-[100px] md:max-w-[130px] truncate">{page.file_name}</span>
+                {page.doc_page_number && (
+                  <span className="text-indigo-400/90 font-medium shrink-0">#{page.doc_page_number}</span>
+                )}
+              </span>
+            )}
+
             {page.isProcessing ? (
-              <span className="flex items-center space-x-1.5 text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2.5 py-0.5 rounded-full animate-pulse font-medium">
+              <span className="flex items-center space-x-1 text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full animate-pulse font-medium shrink-0">
                 <RefreshCw className="h-3 w-3 animate-spin" />
-                <span>AI Vision Restoring...</span>
+                <span>Restoring...</span>
               </span>
             ) : page.model_used === "blank-skipped" || page.is_blank ? (
-              <span className="flex items-center space-x-1 text-[11px] text-slate-300 bg-slate-800/90 border border-slate-700 px-2.5 py-0.5 rounded-full font-medium" title="Blank / empty page detected. Skipped AI OCR to save API quota.">
+              <span className="flex items-center space-x-1 text-[11px] text-slate-300 bg-slate-800/90 border border-slate-700 px-2 py-0.5 rounded-full font-medium shrink-0" title="Blank / empty page detected.">
                 <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
-                <span>Blank Page (Skipped)</span>
+                <span>Blank</span>
               </span>
             ) : page.model_used === "english-skipped" || page.is_english_skipped || (page.corrected_text && page.corrected_text.includes("English Page - Skipped")) ? (
-              <span className="flex items-center space-x-1 text-[11px] text-sky-300 bg-sky-500/10 border border-sky-500/30 px-2.5 py-0.5 rounded-full font-medium" title="Pure English page without Khmer detected. Skipped to focus strictly on Khmer content.">
+              <span className="flex items-center space-x-1 text-[11px] text-sky-300 bg-sky-500/10 border border-sky-500/30 px-2 py-0.5 rounded-full font-medium shrink-0" title="Pure English page without Khmer detected.">
                 <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
-                <span>English Page (Skipped)</span>
+                <span>English</span>
               </span>
             ) : page.success || (page.corrected_text && page.corrected_text.trim().length > 0) ? (
-              <span className="flex items-center space-x-1 text-[11px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-medium">
+              <span className="flex items-center space-x-1 text-[11px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full font-medium shrink-0">
                 <Check className="h-3 w-3 text-emerald-400" />
                 <span>Restored</span>
               </span>
             ) : page.error ? (
-              <span className="text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/30 px-2.5 py-0.5 rounded-full font-medium">
-                Failed (Raw Mode)
+              <span className="text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/30 px-2 py-0.5 rounded-full font-medium shrink-0">
+                Failed
               </span>
             ) : (
-              <span className="flex items-center space-x-1 text-[11px] text-slate-400 bg-slate-800/80 border border-slate-700 px-2.5 py-0.5 rounded-full font-medium">
+              <span className="flex items-center space-x-1 text-[11px] text-slate-400 bg-slate-800/80 border border-slate-700 px-2 py-0.5 rounded-full font-medium shrink-0">
                 <Clock className="h-3 w-3 text-slate-500" />
-                <span>Waiting in Queue</span>
+                <span>Queue</span>
               </span>
             )}
 
@@ -151,75 +172,94 @@ export const PageCard: React.FC<PageCardProps> = ({
               issues.length > 0 ? (
                 <span
                   title={`${issues.length} potential Khmer Unicode ordering or OCR anomalies detected`}
-                  className="inline-flex items-center space-x-1 text-[10px] text-rose-300 bg-rose-500/15 border border-rose-500/30 px-2 py-0.5 rounded-full font-medium"
+                  className="inline-flex items-center space-x-1 text-[10px] text-rose-300 bg-rose-500/15 border border-rose-500/30 px-2 py-0.5 rounded-full font-medium shrink-0"
                 >
                   <AlertCircle className="h-3 w-3 text-rose-400" />
-                  <span>{issues.length} Issue{issues.length > 1 ? "s" : ""} (Red Underline)</span>
+                  <span>{issues.length} Issues</span>
                 </span>
               ) : (
-                <span className="hidden sm:inline-flex items-center space-x-1 text-[10px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full font-medium">
+                <span
+                  title="Khmer Unicode Clean (No ordering or font anomalies detected)"
+                  className="hidden md:inline-flex items-center space-x-1 text-[10px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full font-medium shrink-0"
+                >
                   <CheckCircle2 className="h-3 w-3 text-emerald-400" />
-                  <span>Khmer Unicode Clean</span>
+                  <span>Clean</span>
                 </span>
               )
             )}
 
             {page.has_formulas && (
-              <span className="hidden md:inline-flex items-center space-x-1 text-[10px] text-purple-300 bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 rounded-full">
+              <span className="hidden lg:inline-flex items-center space-x-1 text-[10px] text-purple-300 bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 rounded-full shrink-0">
                 <Sigma className="h-3 w-3" />
-                <span>LaTeX Formulas</span>
+                <span>LaTeX</span>
               </span>
             )}
           </div>
 
-          {/* Metrics & Actions */}
-          <div className="flex items-center space-x-2">
+          {/* Metrics & Actions (Compact, Clean, Single Row) */}
+          <div className="flex items-center space-x-2 shrink-0">
             {!page.isProcessing && (
               <>
-                {page.model_used && (
-                  <div className="hidden lg:flex items-center space-x-1 text-[11px] text-slate-400 bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700">
-                    <Cpu className="h-3 w-3 text-indigo-400" />
-                    <span>{page.model_used}</span>
-                  </div>
-                )}
-                {page.elapsed_seconds > 0 && (
-                  <div className="hidden sm:flex items-center space-x-1 text-[11px] text-slate-400 bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700">
-                    <Clock className="h-3 w-3 text-amber-400" />
-                    <span>{page.elapsed_seconds}s</span>
-                  </div>
-                )}
-                {page.tokens_used !== undefined && page.tokens_used > 0 && (
-                  <div className="hidden sm:flex items-center space-x-1 text-[11px] text-amber-300 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/25 font-mono shadow-sm" title="Actual tokens consumed for this page">
-                    <span>🪙</span>
-                    <span>{page.tokens_used.toLocaleString()} tokens</span>
+                {/* Unified Metrics Pill */}
+                {(page.model_used || page.elapsed_seconds > 0 || (page.tokens_used !== undefined && page.tokens_used > 0)) && (
+                  <div className="hidden xl:flex items-center space-x-1.5 text-[11px] text-slate-400 bg-slate-900/90 px-2.5 py-1 rounded-lg border border-slate-800 shadow-inner">
+                    {page.model_used && (
+                      <span className="flex items-center space-x-1 font-mono text-indigo-300/90">
+                        <Cpu className="h-3 w-3 text-indigo-400 shrink-0" />
+                        <span>{page.model_used.replace("gemini-", "")}</span>
+                      </span>
+                    )}
+                    {page.elapsed_seconds > 0 && (
+                      <>
+                        <span className="text-slate-600">•</span>
+                        <span className="text-slate-300 font-mono">{page.elapsed_seconds}s</span>
+                      </>
+                    )}
+                    {page.tokens_used !== undefined && page.tokens_used > 0 && (
+                      <>
+                        <span className="text-slate-600">•</span>
+                        <span className="text-amber-400 font-mono font-medium">
+                          🪙 {page.tokens_used.toLocaleString()}
+                        </span>
+                      </>
+                    )}
                   </div>
                 )}
 
                 {onReprocessPage && (
                   <button
-                    onClick={() => onReprocessPage(page.page_number, "gemini-3.6-flash")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onReprocessPage(page.page_number, "gemini-3.6-flash");
+                    }}
                     title="1-Click AI Vision & LaTeX restoration with Gemini 3.6 Flash (#1 Model)"
-                    className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs bg-indigo-600/20 hover:bg-indigo-600/35 text-indigo-200 border border-indigo-500/40 hover:border-indigo-400 transition-all font-semibold active:scale-95 shadow-sm"
+                    className="flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs bg-indigo-600/20 hover:bg-indigo-600/35 text-indigo-200 border border-indigo-500/40 hover:border-indigo-400 transition-all font-semibold active:scale-95 shadow-sm"
                   >
                     <Zap className="h-3.5 w-3.5 text-amber-400 fill-amber-400" />
-                    <span>⚡ 3.6 Flash</span>
+                    <span>3.6 Flash</span>
                   </button>
                 )}
 
                 <button
-                  onClick={() => handleCopy(page.corrected_text || page.raw_text)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCopy(page.corrected_text || page.raw_text);
+                  }}
                   className="flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors"
                   title="Copy page text"
                 >
                   {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-                  <span className="hidden sm:inline">{copied ? "Copied" : "Copy"}</span>
+                  <span>{copied ? "Copied" : "Copy"}</span>
                 </button>
               </>
             )}
 
             <button
-              onClick={handleToggle}
-              className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleToggle();
+              }}
+              className="p-1.5 rounded-lg text-slate-400 group-hover:text-white hover:bg-slate-800 transition-colors"
               title={isOpen ? "Collapse page" : "Expand page"}
             >
               {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -238,11 +278,10 @@ export const PageCard: React.FC<PageCardProps> = ({
                     setViewMode("split");
                     setIsEditing(false);
                   }}
-                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg font-medium transition-all shrink-0 ${
-                    viewMode === "split"
+                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg font-medium transition-all shrink-0 ${viewMode === "split"
                       ? "bg-indigo-600 text-white shadow-sm"
                       : "text-slate-400 hover:text-slate-200"
-                  }`}
+                    }`}
                 >
                   <Columns className="h-3.5 w-3.5" />
                   <span>PDF vs Restored</span>
@@ -252,11 +291,10 @@ export const PageCard: React.FC<PageCardProps> = ({
                     setViewMode("rendered");
                     setIsEditing(false);
                   }}
-                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg font-medium transition-all shrink-0 ${
-                    viewMode === "rendered"
+                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg font-medium transition-all shrink-0 ${viewMode === "rendered"
                       ? "bg-indigo-600 text-white shadow-sm"
                       : "text-slate-400 hover:text-slate-200"
-                  }`}
+                    }`}
                 >
                   <Eye className="h-3.5 w-3.5" />
                   <span>KaTeX & Markdown</span>
@@ -266,11 +304,10 @@ export const PageCard: React.FC<PageCardProps> = ({
                     setViewMode("clean_text");
                     setIsEditing(false);
                   }}
-                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg font-medium transition-all shrink-0 ${
-                    viewMode === "clean_text"
+                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg font-medium transition-all shrink-0 ${viewMode === "clean_text"
                       ? "bg-indigo-600 text-white shadow-sm"
                       : "text-slate-400 hover:text-slate-200"
-                  }`}
+                    }`}
                 >
                   <Code className="h-3.5 w-3.5" />
                   <span>Clean Text (.txt)</span>
@@ -280,11 +317,10 @@ export const PageCard: React.FC<PageCardProps> = ({
                     setViewMode("raw");
                     setIsEditing(false);
                   }}
-                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg font-medium transition-all shrink-0 ${
-                    viewMode === "raw"
+                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg font-medium transition-all shrink-0 ${viewMode === "raw"
                       ? "bg-indigo-600 text-white shadow-sm"
                       : "text-slate-400 hover:text-slate-200"
-                  }`}
+                    }`}
                 >
                   <FileImage className="h-3.5 w-3.5" />
                   <span>Raw Text</span>
@@ -296,11 +332,10 @@ export const PageCard: React.FC<PageCardProps> = ({
                 <button
                   type="button"
                   onClick={() => setHighlightErrors(!highlightErrors)}
-                  className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                    highlightErrors
+                  className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${highlightErrors
                       ? "bg-rose-500/15 border-rose-500/30 text-rose-300 hover:bg-rose-500/25"
                       : "bg-slate-800/80 border-slate-700 text-slate-400 hover:text-slate-200"
-                  }`}
+                    }`}
                   title="Toggle red wavy underline on Khmer spelling and OCR errors"
                 >
                   <AlertCircle className={`h-3 w-3 ${highlightErrors ? "text-rose-400" : "text-slate-400"}`} />
@@ -317,11 +352,10 @@ export const PageCard: React.FC<PageCardProps> = ({
                         setIsEditing(true);
                       }
                     }}
-                    className={`flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                      isEditing
+                    className={`flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-medium border transition-colors ${isEditing
                         ? "bg-emerald-600/20 border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/30"
                         : "bg-slate-800/80 border-slate-700 text-slate-300 hover:text-white"
-                    }`}
+                      }`}
                   >
                     {isEditing ? <Save className="h-3 w-3 text-emerald-400" /> : <Edit3 className="h-3 w-3" />}
                     <span>{isEditing ? "Save Edits" : "Edit Text"}</span>
@@ -466,8 +500,21 @@ export const PageCard: React.FC<PageCardProps> = ({
                 </pre>
               </div>
             )}
-          </div>
-        )}
+
+              {/* Quick Bottom Collapse Bar */}
+              <div className="pt-2.5 border-t border-slate-800/80 flex justify-center">
+                <button
+                  type="button"
+                  onClick={handleToggle}
+                  className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 transition-all shadow-sm group"
+                  title="Collapse this page"
+                >
+                  <ChevronUp className="h-3.5 w-3.5 text-indigo-400 group-hover:-translate-y-0.5 transition-transform" />
+                  <span>បង្រួមទំព័រនេះ (Collapse Page #{page.page_number})</span>
+                </button>
+              </div>
+            </div>
+          )}
       </div>
 
       {/* Full Size Image Modal */}

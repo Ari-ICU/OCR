@@ -11,19 +11,36 @@ import {
   Zap,
   Eye,
   Layers,
+  Files,
+  Plus,
+  Trash2,
   RotateCcw,
   ArrowRight,
   Link as LinkIcon,
   Download,
-  Loader2
+  Loader2,
+  CheckCircle2
 } from "lucide-react";
 import { API_BASE_URL } from "../config/api";
+
+export interface FileBreakdownItem {
+  filename: string;
+  pages: number;
+  start_page?: number;
+  end_page?: number;
+  size_bytes?: number;
+}
 
 interface FileUploadProps {
   onFileSelected?: (file: File) => void;
   onFilesSelected?: (files: File[]) => void;
+  onAddFiles?: (files: File[]) => void;
+  onRemoveFile?: (index: number) => void;
   selectedFile: File | null;
   selectedFiles?: File[];
+  filesBreakdown?: FileBreakdownItem[];
+  multiPdfMode?: "merged" | "batch";
+  setMultiPdfMode?: (mode: "merged" | "batch") => void;
   onClearFile: () => void;
   isProcessing: boolean;
   onStartProcessing: () => void;
@@ -45,8 +62,13 @@ interface FileUploadProps {
 export const FileUpload: React.FC<FileUploadProps> = ({
   onFileSelected,
   onFilesSelected,
+  onAddFiles,
+  onRemoveFile,
   selectedFile,
   selectedFiles = [],
+  filesBreakdown = [],
+  multiPdfMode = "merged",
+  setMultiPdfMode,
   onClearFile,
   isProcessing,
   onStartProcessing,
@@ -70,6 +92,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
   const [isDragOver, setIsDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const addFileInputRef = useRef<HTMLInputElement>(null);
 
   // Local string buffers for buttery smooth typing & deleting
   const [startInput, setStartInput] = useState<string>(String(startPage || 1));
@@ -92,6 +115,11 @@ export const FileUpload: React.FC<FileUploadProps> = ({
 
   const activeFileList = selectedFiles.length > 0 ? selectedFiles : selectedFile ? [selectedFile] : [];
   const isMultiple = activeFileList.length > 1;
+
+  const isAllPdfs = Boolean(
+    activeFileList.length > 0 &&
+    activeFileList.every((f) => f.name.toLowerCase().endsWith(".pdf") || f.type === "application/pdf")
+  );
 
   const isImageFile = Boolean(
     activeFileList.length > 0 &&
@@ -161,7 +189,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     setIsDragOver(false);
   };
 
-  const processIncomingFiles = (incomingList: FileList | File[]) => {
+  const processIncomingFiles = (incomingList: FileList | File[], isAppending = false) => {
     setError(null);
     const filesArray = Array.from(incomingList);
     const valid = filesArray.filter(isValidFileType);
@@ -171,12 +199,14 @@ export const FileUpload: React.FC<FileUploadProps> = ({
       return;
     }
 
-    // Natural sort by filename (e.g. Page_1, Page_2, Page_10)
+    // Natural sort by filename
     const sorted = valid.sort((a, b) =>
       a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })
     );
 
-    if (onFilesSelected) {
+    if (isAppending && onAddFiles) {
+      onAddFiles(sorted);
+    } else if (onFilesSelected) {
       onFilesSelected(sorted);
     } else if (onFileSelected && sorted.length > 0) {
       onFileSelected(sorted[0]);
@@ -194,6 +224,16 @@ export const FileUpload: React.FC<FileUploadProps> = ({
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       processIncomingFiles(e.target.files);
+    }
+  };
+
+  const handleAddFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      processIncomingFiles(e.target.files, true);
+    }
+    // Reset file input value so re-selecting same file triggers change
+    if (addFileInputRef.current) {
+      addFileInputRef.current.value = "";
     }
   };
 
@@ -224,37 +264,32 @@ export const FileUpload: React.FC<FileUploadProps> = ({
         throw new Error(errorJson?.detail || `Failed to download file from link (HTTP ${res.status})`);
       }
 
-      const isWebpage = (res.headers.get("x-is-webpage") || "").toLowerCase() === "true";
-      if (isWebpage) {
-        throw new Error(
-          "តំណភ្ជាប់នេះជាទំព័រ Webpage HTML (មិនមែនជាឯកសារ PDF ឬរូបភាពទេ)។ សូមបញ្ចូលតំណភ្ជាប់ឯកសារ PDF ឬរូបភាព។ (This link is a webpage HTML, not a PDF or image file. Please provide a direct PDF or image URL.)"
-        );
+      // Try to determine filename from Content-Disposition header
+      let filename = "downloaded_document.pdf";
+      const disposition = res.headers.get("content-disposition");
+      if (disposition && disposition.includes("filename=")) {
+        const match = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (match && match[1]) {
+          filename = match[1].replace(/['"]/g, "").trim();
+        }
+      } else {
+        try {
+          const urlObj = new URL(cleanUrl);
+          const pathSegments = urlObj.pathname.split("/").filter(Boolean);
+          if (pathSegments.length > 0) {
+            const last = pathSegments[pathSegments.length - 1];
+            if (last.includes(".")) filename = decodeURIComponent(last);
+          }
+        } catch {}
       }
 
       const blob = await res.blob();
-      const rawDisplayName = res.headers.get("X-Display-Name") || res.headers.get("x-display-name");
-      let filename = "";
-      if (rawDisplayName) {
-        try {
-          filename = decodeURIComponent(rawDisplayName);
-        } catch {
-          filename = rawDisplayName;
-        }
-      }
-      if (!filename) {
-        filename =
-          res.headers.get("X-Filename") ||
-          res.headers.get("x-filename") ||
-          "imported_document.pdf";
-      }
-
       const downloadedFile = new File([blob], filename, {
         type: blob.type || "application/pdf",
         lastModified: Date.now(),
       });
 
       processIncomingFiles([downloadedFile]);
-      setUrlInput("");
     } catch (err: any) {
       setError(err?.message || "Failed to download file from link.");
     } finally {
@@ -263,64 +298,58 @@ export const FileUpload: React.FC<FileUploadProps> = ({
   };
 
   const formatFileSize = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    if (bytes === 0) return "0 Bytes";
+    const k = 1024;
+    const sizes = ["Bytes", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
   };
 
-  // Quick helper to jump to the next batch (e.g. if 1-2 done, suggest 3-4)
+  // Helper to compute next chunk range for auto-continuation
   const maxExtractedPage = existingPageNumbers.length > 0 ? Math.max(...existingPageNumbers) : 0;
-  const nextStart = maxExtractedPage > 0 ? maxExtractedPage + 1 : 1;
-  const currentSpan = (endPage && startPage && endPage >= startPage) ? (endPage - startPage + 1) : 2;
-  const nextEnd = totalPdfPages > 0 ? Math.min(totalPdfPages, nextStart + currentSpan - 1) : nextStart + 1;
-
-  const handleSetNextBatch = () => {
-    setStartPage(nextStart);
-    setStartInput(String(nextStart));
-    setEndPage(nextEnd);
-    setEndInput(String(nextEnd));
-  };
+  const nextStart = Math.min(maxExtractedPage + 1, totalPdfPages || 1);
+  const currentSpan = Math.max(1, (endPage || 1) - startPage + 1);
 
   const handleSetAllRemaining = () => {
     setStartPage(nextStart);
-    setStartInput(String(nextStart));
-    setEndPage(totalPdfPages);
-    setEndInput(String(totalPdfPages));
+    setEndPage(totalPdfPages || null);
+  };
+
+  const handleSetNextBatch = () => {
+    setStartPage(nextStart);
+    setEndPage(Math.min(nextStart + currentSpan - 1, totalPdfPages || nextStart));
   };
 
   return (
-    <div className="w-full space-y-4">
+    <div className="space-y-4">
       {activeFileList.length === 0 ? (
         <div className="space-y-3">
-          {/* Toggle between Local Upload & Link Import */}
-          <div className="flex items-center justify-center">
-            <div className="inline-flex p-1 rounded-2xl bg-[#0D1322] border border-slate-800 shadow-lg">
-              <button
-                type="button"
-                onClick={() => { setActiveTab("file"); setError(null); }}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
-                  activeTab === "file"
-                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <FileUp className="h-4 w-4" />
-                <span>Local Files (PDF / Images)</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => { setActiveTab("url"); setError(null); }}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
-                  activeTab === "url"
-                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <LinkIcon className="h-4 w-4" />
-                <span>Import via Link / URL</span>
-              </button>
-            </div>
+          {/* Source Tabs: Upload File vs Fetch from Link */}
+          <div className="flex items-center justify-center space-x-2 pb-1">
+            <button
+              type="button"
+              onClick={() => setActiveTab("file")}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === "file"
+                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+                  : "bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800"
+              }`}
+            >
+              <FileUp className="h-3.5 w-3.5" />
+              <span>Upload Local Files</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("url")}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === "url"
+                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+                  : "bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800"
+              }`}
+            >
+              <LinkIcon className="h-3.5 w-3.5" />
+              <span>Import from Link / URL</span>
+            </button>
           </div>
 
           {activeTab === "file" ? (
@@ -349,18 +378,18 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                 </div>
                 <div className="space-y-1.5">
                   <h3 className="text-base font-bold text-white">
-                    Upload Khmer PDF Documents or Multiple Images
+                    Upload Multiple Khmer PDF Documents or Images
                   </h3>
                   <p className="text-xs text-slate-400 max-w-md mx-auto font-khmer">
-                    ទម្លាក់ឯកសារ PDF ឬរូបភាពច្រើនសន្លឹក (PNG, JPG, WEBP) ដើម្បីបំប្លែង និងច្របាច់បញ្ចូលគ្នាដោយស្វ័យប្រវត្តិ
+                    ទម្លាក់ឯកសារ PDF ច្រើនសន្លឹក ឬរូបភាព (PNG, JPG, WEBP) ដើម្បីបំប្លែង និងច្របាច់បញ្ចូលគ្នាដោយស្វ័យប្រវត្តិ
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] text-slate-400 pt-1">
-                  <span className="px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700 font-medium">📄 PDF & 🖼️ Multi-Images</span>
+                  <span className="px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700 font-medium text-indigo-300">📄 Multiple PDFs Supported</span>
                   <span>•</span>
-                  <span className="px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700 font-medium">Vision OCR (Subscripts ជើង)</span>
+                  <span className="px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700 font-medium">🖼️ Multi-Images</span>
                   <span>•</span>
-                  <span className="px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700 font-medium">Auto-Numbered Pages</span>
+                  <span className="px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700 font-medium">Hybrid Merged / Batch</span>
                 </div>
               </div>
             </div>
@@ -452,25 +481,25 @@ export const FileUpload: React.FC<FileUploadProps> = ({
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
             <div className="flex items-center space-x-3.5">
               <div className="h-11 w-11 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0 shadow-md">
-                {isImageFile ? <ImageIcon className="h-5 w-5 text-indigo-400" /> : <FileText className="h-5 w-5" />}
+                {isImageFile ? <ImageIcon className="h-5 w-5 text-indigo-400" /> : isMultiple ? <Files className="h-5 w-5 text-indigo-400" /> : <FileText className="h-5 w-5" />}
               </div>
               <div className="overflow-hidden">
                 <h4 className="text-sm font-semibold text-white truncate max-w-xs sm:max-w-md">
                   {isMultiple
-                    ? `${activeFileList.length} Images Merged (${activeFileList[0].name} ...)`
+                    ? isAllPdfs
+                      ? `${activeFileList.length} PDF Documents Selected`
+                      : isImageFile
+                      ? `${activeFileList.length} Images Selected`
+                      : `${activeFileList.length} Files Selected`
                     : activeFileList[0].name}
                 </h4>
                 <div className="flex items-center space-x-2 text-xs text-slate-400 font-medium pt-0.5 flex-wrap gap-y-1">
                   <span>{formatFileSize(totalFileSize)}</span>
                   <span>•</span>
                   <span>
-                    {isMultiple
-                      ? `${activeFileList.length} Pages (Multi-Image)`
-                      : isImageFile
-                      ? "Single Page Image"
-                      : totalPdfPages > 0
-                      ? `${totalPdfPages} Total Pages in PDF`
-                      : "Document Ready"}
+                    {totalPdfPages > 0
+                      ? `${totalPdfPages} Total Pages`
+                      : `${activeFileList.length} File${activeFileList.length > 1 ? "s" : ""}`}
                   </span>
                   {existingPagesCount > 0 && (
                     <>
@@ -523,19 +552,150 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                     type="button"
                     onClick={onClearFile}
                     className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-800 border border-slate-700 transition-colors"
-                    title="Choose different file"
+                    title="Clear files and choose different document"
                   >
                     <X className="h-3.5 w-3.5" />
-                    <span>Change File</span>
+                    <span>Clear All</span>
                   </button>
                 </div>
               )}
             </div>
           </div>
 
+          {/* MULTI-FILE TRAY: Displays all uploaded PDFs / images with individual remove & "+ Add More" */}
+          {activeFileList.length > 0 && (
+            <div className="bg-[#070A12] border border-slate-800/90 rounded-xl p-3 space-y-2.5">
+              <div className="flex items-center justify-between flex-wrap gap-2 text-xs">
+                <div className="flex items-center space-x-2 text-slate-300 font-semibold">
+                  <Files className="h-4 w-4 text-indigo-400" />
+                  <span>
+                    Uploaded Files ({activeFileList.length})
+                  </span>
+                </div>
+
+                {/* Hybrid Mode Toggle (Merged vs Batch) */}
+                {setMultiPdfMode && isMultiple && (
+                  <div className="flex items-center bg-slate-900/90 p-0.5 rounded-lg border border-slate-800">
+                    <button
+                      type="button"
+                      disabled={isProcessing}
+                      onClick={() => setMultiPdfMode("merged")}
+                      className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${
+                        multiPdfMode === "merged"
+                          ? "bg-indigo-600 text-white shadow-sm font-semibold"
+                          : "text-slate-400 hover:text-white"
+                      }`}
+                      title="Merge all PDFs sequentially into one continuous document"
+                    >
+                      <Layers className="h-3 w-3" />
+                      <span>Merged Document</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isProcessing}
+                      onClick={() => setMultiPdfMode("batch")}
+                      className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${
+                        multiPdfMode === "batch"
+                          ? "bg-indigo-600 text-white shadow-sm font-semibold"
+                          : "text-slate-400 hover:text-white"
+                      }`}
+                      title="Keep PDFs separate with document tabs and ZIP export"
+                    >
+                      <Files className="h-3 w-3" />
+                      <span>Batch Queue</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* "+ Add More Files" Button */}
+                {!isProcessing && (
+                  <div>
+                    <input
+                      type="file"
+                      ref={addFileInputRef}
+                      onChange={handleAddFileInputChange}
+                      accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp,.tiff,application/pdf,image/*"
+                      multiple
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => addFileInputRef.current?.click()}
+                      className="flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs text-indigo-300 hover:text-white bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 transition-all font-medium"
+                      title="Add more PDF or image files to the current selection"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      <span>Add More PDFs</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Scrollable list of files */}
+              <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto pr-1">
+                {activeFileList.map((file, idx) => {
+                  const bd = filesBreakdown.find((b) => b.filename === file.name);
+                  const isPdf = file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf";
+                  return (
+                    <div
+                      key={`${file.name}-${idx}`}
+                      className="flex items-center space-x-2 bg-slate-900/90 hover:bg-slate-800/90 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-200 transition-colors group"
+                    >
+                      {isPdf ? (
+                        <FileText className="h-3.5 w-3.5 text-rose-400 shrink-0" />
+                      ) : (
+                        <ImageIcon className="h-3.5 w-3.5 text-purple-400 shrink-0" />
+                      )}
+                      <span className="font-mono text-[11px] truncate max-w-[160px] sm:max-w-[220px]" title={file.name}>
+                        {file.name}
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        {formatFileSize(file.size)}
+                      </span>
+                      {bd && bd.pages > 0 && (
+                        <span className="text-[10px] bg-slate-800 text-indigo-300 px-1.5 py-0.2 rounded border border-slate-700 font-mono">
+                          {bd.pages} pgs
+                        </span>
+                      )}
+                      {!isProcessing && onRemoveFile && activeFileList.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => onRemoveFile(idx)}
+                          className="text-slate-500 hover:text-rose-400 p-0.5 rounded transition-colors"
+                          title={`Remove ${file.name}`}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Mode Description Banner */}
+              {isMultiple && (
+                <div className="text-[11px] text-slate-400 pt-1 border-t border-slate-800/60 flex items-center justify-between flex-wrap gap-1">
+                  <span>
+                    {multiPdfMode === "merged" ? (
+                      <span className="text-indigo-300">
+                        ⚡ <strong>Merged Mode:</strong> All {activeFileList.length} documents will be unified into 1 sequence (Pages 1 to {totalPdfPages || activeFileList.length}).
+                      </span>
+                    ) : (
+                      <span className="text-emerald-300">
+                        📁 <strong>Batch Mode:</strong> Documents will be tracked individually with document filter tabs &amp; Batch ZIP download.
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-[10px] text-slate-500">
+                    Total: {activeFileList.length} files • {formatFileSize(totalFileSize)}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Configuration Controls Bar */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
-
             {/* Page Range Selection with Free-Type Numeric Inputs */}
             <div className="bg-[#070A12] border border-slate-800 rounded-xl p-3 space-y-1.5">
               <div className="flex items-center justify-between text-[11px] font-semibold text-slate-300">
@@ -543,7 +703,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                   <Layers className="h-3.5 w-3.5 text-purple-400" />
                   <span>Page Range</span>
                 </span>
-                
+
                 {maxExtractedPage > 0 && maxExtractedPage < totalPdfPages && (
                   <div className="flex items-center space-x-1.5">
                     <button
@@ -641,7 +801,9 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                   ⚡ Auto-Resume: Extracting pages <strong>{startPage} to {endPage || totalPdfPages || startPage}</strong> ({existingPagesCount} completed pages will be auto-skipped).
                 </span>
               ) : (
-                <span>Extracting pages <strong>{startPage} to {endPage || totalPdfPages || startPage}</strong></span>
+                <span>
+                  Extracting {isMultiple ? `${activeFileList.length} documents` : "document"} (pages <strong>{startPage} to {endPage || totalPdfPages || startPage}</strong>)
+                </span>
               )}
             </div>
 

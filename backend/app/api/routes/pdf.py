@@ -186,7 +186,16 @@ async def extract_correct_stream(request: Request):
     else:
         max_concurrency = max(1, min(concurrency, 2))
     render_dpi = max(72, min(dpi, 300))
-    doc_title = files_data[0][0] if len(files_data) == 1 else f"{len(files_data)} Merged Images"
+    if len(files_data) == 1:
+        doc_title = files_data[0][0]
+    else:
+        pdf_count = sum(1 for f in files_data if f[0].lower().endswith(".pdf"))
+        if pdf_count == len(files_data):
+            doc_title = f"{len(files_data)} PDF Documents ({files_data[0][0]} ...)"
+        elif pdf_count == 0:
+            doc_title = f"{len(files_data)} Merged Images"
+        else:
+            doc_title = f"{len(files_data)} Merged Files"
     
     skip_pages_raw = fields.get("skip_pages", "")
     skip_pages = set()
@@ -203,7 +212,7 @@ async def extract_correct_stream(request: Request):
 
     async def event_generator():
         try:
-            doc = PDFService.create_document_from_files_data(files_data)
+            doc, files_summary, page_to_file = PDFService.create_document_with_file_map(files_data)
             total_doc_pages = len(doc)
             
             s_idx = max(0, start_page - 1)
@@ -213,13 +222,18 @@ async def extract_correct_stream(request: Request):
             # Pre-extract all page images, thumbnails, and raw text safely in memory
             pages_bundle = []
             pages_overview = []
+            first_fname = files_data[0][0] if files_data else "document"
             for i in range(s_idx, e_idx):
                 p = doc[i]
+                page_num = i + 1
+                file_info = page_to_file.get(page_num, {"file_name": first_fname, "doc_page_number": page_num})
                 raw_txt = p.get_text("text").strip()
                 thumb = PDFService.render_page_thumbnail_base64(p, dpi=75)
                 highres_img = PDFService.render_page_image_bytes(p, dpi=render_dpi)
                 pages_overview.append({
-                    "page_number": i + 1,
+                    "page_number": page_num,
+                    "file_name": file_info["file_name"],
+                    "doc_page_number": file_info["doc_page_number"],
                     "raw_text": raw_txt,
                     "char_count": len(raw_txt),
                     "word_count": len(raw_txt.split()),
@@ -227,7 +241,9 @@ async def extract_correct_stream(request: Request):
                     "thumbnail": thumb
                 })
                 pages_bundle.append({
-                    "page_number": i + 1,
+                    "page_number": page_num,
+                    "file_name": file_info["file_name"],
+                    "doc_page_number": file_info["doc_page_number"],
                     "raw_text": raw_txt,
                     "image_bytes": highres_img
                 })
@@ -235,7 +251,7 @@ async def extract_correct_stream(request: Request):
             # Close PyMuPDF document immediately to free memory and avoid thread locks
             doc.close()
 
-            yield f"event: init\ndata: {json.dumps({'filename': doc_title, 'total_pages': selected_pages_count, 'doc_total_pages': total_doc_pages, 'start_page': s_idx + 1, 'end_page': e_idx, 'mode': mode, 'provider': provider, 'model': model or settings.MODELS_TO_TRY[0], 'metadata': {'title': doc_title, 'author': 'Unknown'}, 'pages_overview': pages_overview, 'session_id': session_id})}\n\n"
+            yield f"event: init\ndata: {json.dumps({'filename': doc_title, 'total_pages': selected_pages_count, 'doc_total_pages': total_doc_pages, 'start_page': s_idx + 1, 'end_page': e_idx, 'mode': mode, 'provider': provider, 'model': model or settings.MODELS_TO_TRY[0], 'metadata': {'title': doc_title, 'author': 'Unknown'}, 'files': files_summary, 'pages_overview': pages_overview, 'session_id': session_id})}\n\n"
             
             if selected_pages_count == 0:
                 yield f"event: done\ndata: {json.dumps({'total_pages': 0, 'full_text': ''})}\n\n"
@@ -248,6 +264,8 @@ async def extract_correct_stream(request: Request):
 
             async def process_single_page(item: Dict[str, Any]):
                 page_num = item["page_number"]
+                file_name = item.get("file_name", "")
+                doc_page_num = item.get("doc_page_number", page_num)
                 raw_txt = item["raw_text"]
                 img_bytes = item["image_bytes"]
                 
@@ -259,7 +277,7 @@ async def extract_correct_stream(request: Request):
 
                         # Notify page start
                         await event_queue.put(
-                            f"event: page_start\ndata: {json.dumps({'page_number': page_num, 'raw_text': raw_txt})}\n\n"
+                            f"event: page_start\ndata: {json.dumps({'page_number': page_num, 'file_name': file_name, 'doc_page_number': doc_page_num, 'raw_text': raw_txt})}\n\n"
                         )
 
                         # Fast-Skip for already completed / restored pages
@@ -287,7 +305,7 @@ async def extract_correct_stream(request: Request):
                             log_manager.emit(
                                 level="INFO",
                                 event="PAGE_SKIPPED",
-                                message=f"⏩ Page {page_num} is blank or empty scan. Fast-skipping to save API quota.",
+                                message=f"⏩ Page {page_num} ({file_name}) is blank or empty scan. Fast-skipping to save API quota.",
                                 model="blank-skipped",
                                 page_number=page_num
                             )
@@ -305,7 +323,7 @@ async def extract_correct_stream(request: Request):
                             log_manager.emit(
                                 level="INFO",
                                 event="PAGE_SKIPPED",
-                                message=f"⏩ Page {page_num} contains only English text with no Khmer. Fast-skipping to focus on Khmer and save API quota.",
+                                message=f"⏩ Page {page_num} ({file_name}) contains only English text with no Khmer. Fast-skipping to focus on Khmer and save API quota.",
                                 model="english-skipped",
                                 page_number=page_num
                             )
@@ -358,7 +376,7 @@ async def extract_correct_stream(request: Request):
                         
                         # Notify page complete
                         await event_queue.put(
-                            f"event: page_done\ndata: {json.dumps({'page_number': page_num, 'raw_text': raw_txt, 'corrected_text': res.get('corrected_text', ''), 'model_used': res.get('model_used', 'unknown'), 'elapsed_seconds': res.get('elapsed_seconds', 0.0), 'tokens_used': res.get('tokens_used', 0), 'success': res.get('success', False), 'error': res.get('error'), 'already_completed': res.get('already_completed', False), 'is_blank': res.get('is_blank', False)})}\n\n"
+                            f"event: page_done\ndata: {json.dumps({'page_number': page_num, 'file_name': file_name, 'doc_page_number': doc_page_num, 'raw_text': raw_txt, 'corrected_text': res.get('corrected_text', ''), 'model_used': res.get('model_used', 'unknown'), 'elapsed_seconds': res.get('elapsed_seconds', 0.0), 'tokens_used': res.get('tokens_used', 0), 'success': res.get('success', False), 'error': res.get('error'), 'already_completed': res.get('already_completed', False), 'is_blank': res.get('is_blank', False)})}\n\n"
                         )
                 except asyncio.CancelledError:
                     # Clean cancellation, do not emit further events or errors
@@ -369,7 +387,7 @@ async def extract_correct_stream(request: Request):
                     logger.exception(f"Error processing page {page_num}: {ex}")
                     all_corrected_dict[page_num] = raw_txt or ""
                     await event_queue.put(
-                        f"event: page_done\ndata: {json.dumps({'page_number': page_num, 'raw_text': raw_txt, 'corrected_text': raw_txt or '', 'model_used': 'error-fallback', 'elapsed_seconds': 0.0, 'tokens_used': 0, 'success': False, 'error': str(ex)})}\n\n"
+                        f"event: page_done\ndata: {json.dumps({'page_number': page_num, 'file_name': file_name, 'doc_page_number': doc_page_num, 'raw_text': raw_txt, 'corrected_text': raw_txt or '', 'model_used': 'error-fallback', 'elapsed_seconds': 0.0, 'tokens_used': 0, 'success': False, 'error': str(ex)})}\n\n"
                     )
 
             try:

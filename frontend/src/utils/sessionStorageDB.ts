@@ -7,10 +7,18 @@ const STORE_NAME = "session_store";
 const SESSION_KEY = "current_session";
 const FILE_KEY = "current_file";
 
+export interface StoredFileInfo {
+  name: string;
+  size: number;
+  type: string;
+}
+
 export interface StoredSession {
   fileName: string;
   fileSize: number;
   fileType: string;
+  files?: StoredFileInfo[];
+  multiPdfMode?: "merged" | "batch";
   totalPdfDocPages: number;
   totalPages: number;
   startPage: number;
@@ -19,6 +27,13 @@ export interface StoredSession {
   concurrency: number;
   pages: PageResult[];
   savedAt: number;
+}
+
+interface StoredFileRecord {
+  name: string;
+  type: string;
+  lastModified: number;
+  buffer: ArrayBuffer;
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -62,10 +77,10 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 /**
- * Save the entire active session including file binary blob and page results
+ * Save the entire active session including file binary blobs and page results
  */
 export async function persistActiveSession(
-  file: File | null,
+  inputFiles: File[] | File | null,
   pages: PageResult[],
   metadata: {
     totalPdfDocPages: number;
@@ -74,37 +89,50 @@ export async function persistActiveSession(
     endPage: number | null;
     processingMode: "vision" | "text";
     concurrency: number;
+    multiPdfMode?: "merged" | "batch";
   }
 ): Promise<void> {
   try {
-    // 1. Prepare file record and all data BEFORE opening the transaction
-    // Only store binary arrayBuffer in IndexedDB if file is under 25MB to prevent Chrome tab OOM crashes
-    const MAX_STORAGE_BLOB_SIZE = 25 * 1024 * 1024; // 25 MB
-    let fileRecord: {
-      name: string;
-      type: string;
-      lastModified: number;
-      buffer: ArrayBuffer;
-    } | null = null;
+    const filesList: File[] = Array.isArray(inputFiles)
+      ? inputFiles
+      : inputFiles
+      ? [inputFiles]
+      : [];
 
-    if (file && file.size > 0 && file.size <= MAX_STORAGE_BLOB_SIZE) {
-      try {
-        const arrayBuffer = await file.arrayBuffer();
-        fileRecord = {
-          name: file.name,
-          type: file.type || "application/pdf",
-          lastModified: file.lastModified,
-          buffer: arrayBuffer,
-        };
-      } catch (readErr) {
-        console.warn("Could not read file arrayBuffer for persistence", readErr);
+    const primaryFile = filesList.length > 0 ? filesList[0] : null;
+
+    // Only store binary arrayBuffer in IndexedDB if cumulative size is under 40MB
+    const MAX_STORAGE_TOTAL_BLOB_SIZE = 40 * 1024 * 1024; // 40 MB
+    let currentTotalBytes = 0;
+    const records: StoredFileRecord[] = [];
+
+    for (const f of filesList) {
+      if (f && f.size > 0 && currentTotalBytes + f.size <= MAX_STORAGE_TOTAL_BLOB_SIZE) {
+        try {
+          const arrayBuffer = await f.arrayBuffer();
+          records.push({
+            name: f.name,
+            type: f.type || "application/pdf",
+            lastModified: f.lastModified,
+            buffer: arrayBuffer,
+          });
+          currentTotalBytes += f.size;
+        } catch (readErr) {
+          console.warn(`Could not read file buffer for ${f.name}`, readErr);
+        }
       }
     }
 
     const sessionData: StoredSession = {
-      fileName: file?.name || "",
-      fileSize: file?.size || 0,
-      fileType: file?.type || "application/pdf",
+      fileName: primaryFile?.name || "",
+      fileSize: primaryFile?.size || 0,
+      fileType: primaryFile?.type || "application/pdf",
+      files: filesList.map((f) => ({
+        name: f.name,
+        size: f.size,
+        type: f.type || "application/pdf",
+      })),
+      multiPdfMode: metadata.multiPdfMode || "merged",
       totalPdfDocPages: metadata.totalPdfDocPages,
       totalPages: metadata.totalPages,
       startPage: metadata.startPage,
@@ -115,15 +143,16 @@ export async function persistActiveSession(
       savedAt: Date.now(),
     };
 
-    // 2. Open DB and start immediate synchronous transaction
     const db = await openDB();
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
 
     store.put(sessionData, SESSION_KEY);
 
-    if (fileRecord) {
-      store.put(fileRecord, FILE_KEY);
+    if (records.length > 0) {
+      store.put(records, FILE_KEY);
+    } else {
+      store.delete(FILE_KEY);
     }
 
     return new Promise((resolve) => {
@@ -155,7 +184,7 @@ export async function persistPagesOnly(pages: PageResult[]): Promise<void> {
         startPage: 1,
         endPage: 2,
         processingMode: "vision",
-        concurrency: 3,
+        concurrency: 2,
         pages: [],
         savedAt: Date.now(),
       };
@@ -176,6 +205,7 @@ export async function persistPagesOnly(pages: PageResult[]): Promise<void> {
 export async function loadPersistedSession(): Promise<{
   session: StoredSession | null;
   file: File | null;
+  files: File[];
 }> {
   try {
     const db = await openDB();
@@ -189,31 +219,43 @@ export async function loadPersistedSession(): Promise<{
       tx.oncomplete = () => {
         const session: StoredSession | null = sessionReq.result || null;
         let file: File | null = null;
+        const files: File[] = [];
 
-        if (fileReq.result && fileReq.result.buffer) {
-          try {
-            const blob = new Blob([fileReq.result.buffer], {
-              type: fileReq.result.type || "application/pdf",
-            });
-            file = new File([blob], fileReq.result.name || "document.pdf", {
-              type: fileReq.result.type || "application/pdf",
-              lastModified: fileReq.result.lastModified || Date.now(),
-            });
-          } catch (e) {
-            console.warn("Failed to recreate File object from stored buffer:", e);
+        if (fileReq.result) {
+          const raw = fileReq.result;
+          const records: StoredFileRecord[] = Array.isArray(raw) ? raw : [raw];
+
+          for (const rec of records) {
+            if (rec && rec.buffer) {
+              try {
+                const blob = new Blob([rec.buffer], {
+                  type: rec.type || "application/pdf",
+                });
+                const recreated = new File([blob], rec.name || "document.pdf", {
+                  type: rec.type || "application/pdf",
+                  lastModified: rec.lastModified || Date.now(),
+                });
+                files.push(recreated);
+              } catch (e) {
+                console.warn("Failed to recreate File object from stored buffer:", e);
+              }
+            }
+          }
+          if (files.length > 0) {
+            file = files[0];
           }
         }
 
-        resolve({ session, file });
+        resolve({ session, file, files });
       };
 
       tx.onerror = () => {
-        resolve({ session: null, file: null });
+        resolve({ session: null, file: null, files: [] });
       };
     });
   } catch (err) {
     console.warn("Failed to load session from IndexedDB:", err);
-    return { session: null, file: null };
+    return { session: null, file: null, files: [] };
   }
 }
 

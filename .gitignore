@@ -24,12 +24,15 @@ frontend/.env.production.local
 # PDF & Generated Output Data
 pdf/
 txt/
+jsonl/
 images/
 uploads/
 output/
 downloads/
+report/
 *.pdf
 *.txt
+*.jsonl
 
 # Node & Next.js Build Artifacts
 node_modules/
