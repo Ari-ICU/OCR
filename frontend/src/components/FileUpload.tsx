@@ -1,15 +1,9 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import {
-  Link as LinkIcon,
-  FileUp,
-  AlertCircle,
-} from "lucide-react";
-import { DatasetFileItem, FileBreakdownItem, InspectStoreResult } from "../types";
-import { pdfApi, datasetApi } from "../services";
+import { AlertCircle } from "lucide-react";
+import { DatasetFileItem, FileBreakdownItem } from "../types";
 import { LocalDropzone } from "./file-upload/LocalDropzone";
-import { UrlImportBar } from "./file-upload/UrlImportBar";
 import { ActiveFileTray } from "./file-upload/ActiveFileTray";
 
 // Re-export for existing imports
@@ -70,20 +64,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({
   onClearExtractedPages,
   existingPageNumbers = [],
   sessionRestored = false,
-  onProcessUrlStream,
-  onProcessBatchUrlsStream,
 }) => {
-  const [activeTab, setActiveTab] = useState<"url" | "file">("url");
-  const [urlMode, setUrlMode] = useState<"single" | "batch">("single");
-  const [urlInput, setUrlInput] = useState<string>("");
-  const [batchUrlsInput, setBatchUrlsInput] = useState<string>("");
-  const [isFetchingUrl, setIsFetchingUrl] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-
-  const [isConvertingUrl, setIsConvertingUrl] = useState<boolean>(false);
-  const [isProcessingBatch, setIsProcessingBatch] = useState<boolean>(false);
-  const [isInspecting, setIsInspecting] = useState<boolean>(false);
-  const [storeInspection, setStoreInspection] = useState<InspectStoreResult | null>(null);
 
   // Local string buffers for smooth typing
   const [startInput, setStartInput] = useState<string>(String(startPage || 1));
@@ -193,129 +175,6 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     }
   };
 
-  const handleFetchFromUrl = async (specificUrl?: string) => {
-    let cleanUrl = typeof specificUrl === "string" && specificUrl.trim() ? specificUrl.trim() : urlInput.trim();
-
-    // If target is a detected database store and no specific file URL is provided, pick the first PDF
-    if (storeInspection?.is_store && storeInspection.pdfs && storeInspection.pdfs.length > 0) {
-      if (!specificUrl || typeof specificUrl !== "string") {
-        cleanUrl = storeInspection.pdfs[0].url;
-      }
-    }
-
-    if (!cleanUrl) {
-      setError("Please enter a valid link (URL).");
-      return;
-    }
-    if (!cleanUrl.startsWith("http://") && !cleanUrl.startsWith("https://")) {
-      setError("URL must start with http:// or https://");
-      return;
-    }
-
-    setIsFetchingUrl(true);
-    setError(null);
-
-    try {
-      const downloadedFile = await pdfApi.fetchUrlFile(cleanUrl);
-      processIncomingFiles([downloadedFile]);
-    } catch (err: any) {
-      setError(err?.message || "Failed to download file from link.");
-    } finally {
-      setIsFetchingUrl(false);
-    }
-  };
-
-  const handleConvertUrlToTxt = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const cleanUrl = urlInput.trim();
-    if (!cleanUrl) {
-      setError("Please enter a valid PDF URL from your server store.");
-      return;
-    }
-    if (!cleanUrl.startsWith("http://") && !cleanUrl.startsWith("https://")) {
-      setError("URL must start with http:// or https://");
-      return;
-    }
-
-    if (onProcessUrlStream) {
-      setIsConvertingUrl(true);
-      setError(null);
-      try {
-        await onProcessUrlStream(cleanUrl, startPage, endPage);
-      } catch (err: any) {
-        setError(err?.message || "Stream conversion failed.");
-      } finally {
-        setIsConvertingUrl(false);
-      }
-      return;
-    }
-
-    setIsConvertingUrl(true);
-    setError(null);
-    try {
-      await datasetApi.convertUrlToTxt({
-        url: cleanUrl,
-        start_page: startPage,
-        end_page: endPage,
-        mode: "vision",
-        provider: "gemini",
-        use_ai: true,
-        save_to_txt: true,
-        save_to_jsonl: true,
-        save_to_pdf_dataset: true,
-      });
-    } catch (err: any) {
-      setError(err?.message || "Failed to convert URL to TXT on server.");
-    } finally {
-      setIsConvertingUrl(false);
-    }
-  };
-
-  const handleInspectStoreUrl = async (urlOverride?: string) => {
-    const targetUrl = (urlOverride || urlInput).trim();
-    if (!targetUrl) {
-      setError("Please enter a server store URL or database API endpoint.");
-      return;
-    }
-    setIsInspecting(true);
-    setError(null);
-    try {
-      const data = await datasetApi.inspectUrl(targetUrl);
-      setStoreInspection(data);
-    } catch (err: any) {
-      setError(err?.message || "Failed to inspect database store URL.");
-    } finally {
-      setIsInspecting(false);
-    }
-  };
-
-  const handleConvertBatchUrlsToTxt = async () => {
-    const rawUrls = batchUrlsInput
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l.startsWith("http://") || l.startsWith("https://"));
-
-    if (rawUrls.length === 0) {
-      setError("Please enter at least one valid PDF URL starting with http:// or https://");
-      return;
-    }
-
-    if (onProcessBatchUrlsStream) {
-      setIsProcessingBatch(true);
-      setError(null);
-      try {
-        await onProcessBatchUrlsStream(rawUrls);
-      } catch (err: any) {
-        setError(err?.message || "Batch conversion failed.");
-      } finally {
-        setIsProcessingBatch(false);
-      }
-      return;
-    }
-
-    setError("Batch stream processor is not configured.");
-  };
-
   const formatFileSize = (bytes: number) => {
     if (!bytes || bytes === 0) return "0 Bytes";
     const k = 1024;
@@ -328,68 +187,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     <div className="space-y-4">
       {activeFileList.length === 0 ? (
         <div className="space-y-3">
-          {/* Source Tabs: Server Store / URL vs Upload Local File */}
-          <div className="flex items-center justify-center space-x-2 pb-1 flex-wrap gap-y-2">
-            <button
-              type="button"
-              onClick={() => setActiveTab("url")}
-              className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                activeTab === "url"
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800"
-              }`}
-            >
-              <LinkIcon className="h-3.5 w-3.5 text-indigo-300" />
-              <span>Server Store / URL</span>
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-500/10 text-emerald-400 font-semibold border border-emerald-500/20">
-                Direct ➔ TXT
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("file")}
-              className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                activeTab === "file"
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800"
-              }`}
-            >
-              <FileUp className="h-3.5 w-3.5" />
-              <span>Upload Local Files</span>
-            </button>
-          </div>
-
-          {activeTab === "url" ? (
-            <UrlImportBar
-              urlInput={urlInput}
-              setUrlInput={setUrlInput}
-              urlMode={urlMode}
-              setUrlMode={setUrlMode}
-              batchUrlsInput={batchUrlsInput}
-              setBatchUrlsInput={setBatchUrlsInput}
-              isInspecting={isInspecting}
-              storeInspection={storeInspection}
-              setStoreInspection={setStoreInspection}
-              isConvertingUrl={isConvertingUrl}
-              isFetchingUrl={isFetchingUrl}
-              isProcessingBatch={isProcessingBatch}
-              isProcessing={isProcessing}
-              activeFilesCount={activeFileList.length}
-              handleInspectStoreUrl={handleInspectStoreUrl}
-              handleConvertUrlToTxt={handleConvertUrlToTxt}
-              handleFetchFromUrl={handleFetchFromUrl}
-              handleConvertBatchUrlsToTxt={handleConvertBatchUrlsToTxt}
-              onProcessUrlStream={onProcessUrlStream}
-              startInput={startInput}
-              endInput={endInput}
-              handleStartInputChange={handleStartInputChange}
-              handleStartInputBlur={handleStartInputBlur}
-              handleEndInputChange={handleEndInputChange}
-              handleEndInputBlur={handleEndInputBlur}
-            />
-          ) : (
-            <LocalDropzone onFilesDropped={(files) => processIncomingFiles(files)} />
-          )}
+          <LocalDropzone onFilesDropped={(files) => processIncomingFiles(files)} />
 
           {error && (
             <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center space-x-2">
@@ -416,7 +214,6 @@ export const FileUpload: React.FC<FileUploadProps> = ({
           onAddFiles={(files) => processIncomingFiles(files, true)}
           onClearFile={onClearFile}
           onClearExtractedPages={onClearExtractedPages}
-          onSwitchToUrlTab={() => setActiveTab("url")}
           startPage={startPage}
           setStartPage={setStartPage}
           endPage={endPage}

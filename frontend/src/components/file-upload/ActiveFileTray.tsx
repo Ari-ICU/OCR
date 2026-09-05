@@ -12,7 +12,6 @@ import {
   ArrowRight,
   Zap,
   Sparkles,
-  Link as LinkIcon,
 } from "lucide-react";
 import { FileBreakdownItem } from "../../types";
 
@@ -33,7 +32,6 @@ interface ActiveFileTrayProps {
   onAddFiles?: (files: File[]) => void;
   onClearFile: () => void;
   onClearExtractedPages?: () => void;
-  onSwitchToUrlTab: () => void;
   startPage: number;
   setStartPage: (p: number) => void;
   endPage: number | null;
@@ -68,7 +66,6 @@ export const ActiveFileTray: React.FC<ActiveFileTrayProps> = ({
   onAddFiles,
   onClearFile,
   onClearExtractedPages,
-  onSwitchToUrlTab,
   startPage,
   setStartPage,
   endPage,
@@ -168,29 +165,15 @@ export const ActiveFileTray: React.FC<ActiveFileTrayProps> = ({
           )}
 
           {!isProcessing && (
-            <div className="flex items-center space-x-2">
-              <button
-                type="button"
-                onClick={() => {
-                  onClearFile();
-                  onSwitchToUrlTab();
-                }}
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs text-indigo-300 hover:text-white bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-500/30 transition-colors cursor-pointer"
-                title="Import different file from Link / URL"
-              >
-                <LinkIcon className="h-3.5 w-3.5" />
-                <span>Import Link</span>
-              </button>
-              <button
-                type="button"
-                onClick={onClearFile}
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-800 border border-slate-700 transition-colors cursor-pointer"
-                title="Clear files and choose different document"
-              >
-                <X className="h-3.5 w-3.5" />
-                <span>Clear All</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={onClearFile}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-800 border border-slate-700 transition-colors cursor-pointer"
+              title="Clear files and choose different document"
+            >
+              <X className="h-3.5 w-3.5" />
+              <span>Clear All</span>
+            </button>
           )}
         </div>
       </div>
