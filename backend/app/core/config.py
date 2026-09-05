@@ -20,7 +20,7 @@ class Settings:
     ALLOWED_ORIGINS: List[str] = [
         origin.strip() for origin in os.environ.get("ALLOWED_ORIGINS", "*").split(",") if origin.strip()
     ]
-    MAX_UPLOAD_SIZE_MB: int = int(os.environ.get("MAX_UPLOAD_SIZE_MB", 100))
+    MAX_UPLOAD_SIZE_MB: int = int(os.environ.get("MAX_UPLOAD_SIZE_MB", 5120))
     ENABLE_DOCS: bool = os.environ.get("ENABLE_DOCS", "false").lower() in ("true", "1")
     ALLOW_LOCAL_STORAGE_URLS: bool = os.environ.get("ALLOW_LOCAL_STORAGE_URLS", "true").lower() in ("true", "1")
 

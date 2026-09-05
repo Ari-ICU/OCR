@@ -128,7 +128,7 @@ export const ActiveFileTray: React.FC<ActiveFileTrayProps> = ({
               <span>•</span>
               <span>
                 {totalPdfPages > 0
-                  ? `${totalPdfPages} Total Pages`
+                  ? `${totalPdfPages} Total Pages (${activeFileList.length} ${activeFileList.length === 1 ? "File" : "Files"})`
                   : `${activeFileList.length} File${activeFileList.length > 1 ? "s" : ""}`}
               </span>
               {existingPagesCount > 0 && (
@@ -263,9 +263,13 @@ export const ActiveFileTray: React.FC<ActiveFileTrayProps> = ({
                   <span className="text-[10px] text-slate-500 font-mono">
                     {formatFileSize(file.size)}
                   </span>
-                  {bd && bd.pages > 0 && (
-                    <span className="text-[10px] bg-slate-800 text-indigo-300 px-1.5 py-0.2 rounded border border-slate-700 font-mono">
-                      {bd.pages} pgs
+                  {bd && bd.pages > 0 ? (
+                    <span className="text-[10px] bg-indigo-950/70 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-500/30 font-mono font-medium">
+                      {bd.pages} {bd.pages === 1 ? "page" : "pages"}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded border border-slate-700 font-mono animate-pulse">
+                      reading...
                     </span>
                   )}
                   {!isProcessing && onRemoveFile && activeFileList.length > 1 && (

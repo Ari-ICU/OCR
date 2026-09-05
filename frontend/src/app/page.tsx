@@ -20,6 +20,7 @@ import {
 import { ModelInfo, NavTab, PageResult, FileBreakdownItem } from "../types";
 import { pdfApi } from "../services";
 import { detectKhmerErrors } from "../utils/khmerValidator";
+import { calculateFilesBreakdown } from "../utils/pdfPageCounter";
 
 import {
   persistActiveSession,
@@ -223,6 +224,18 @@ export default function Home() {
           if (restoredList.length > 0 || (session.pages && session.pages.length > 0)) {
             setSessionRestored(true);
           }
+
+          if (restoredList.length > 0) {
+            calculateFilesBreakdown(restoredList)
+              .then(({ breakdown, totalPages: calcTotal }) => {
+                setFilesBreakdown(breakdown);
+                if (!session.totalPdfDocPages || session.totalPdfDocPages <= restoredList.length) {
+                  setTotalPdfDocPages(calcTotal);
+                  setEndPage(calcTotal);
+                }
+              })
+              .catch(() => {});
+          }
         }
       } catch (err) {
         console.warn("Failed to restore previous session from IndexedDB", err);
@@ -382,28 +395,31 @@ export default function Home() {
     setSessionRestored(false);
     setSelectedDocFilter("all");
 
-    let docTotal = files.length;
     try {
-      const data = await pdfApi.extractPreview(files, 1, null);
-      docTotal = data.total_pages || files.length;
-      if (data.files && Array.isArray(data.files)) {
-        setFilesBreakdown(data.files);
-      }
-      setTotalPdfDocPages(docTotal);
-      setEndPage(docTotal);
-    } catch (err) {
-      console.warn("Preview load error", err);
-      setEndPage(files.length);
-    } finally {
+      const { breakdown, totalPages: calculatedTotal } = await calculateFilesBreakdown(files);
+      setFilesBreakdown(breakdown);
+      setTotalPdfDocPages(calculatedTotal);
+      setEndPage(calculatedTotal);
+
       persistActiveSession(files, [], {
-        totalPdfDocPages: docTotal,
+        totalPdfDocPages: calculatedTotal,
         totalPages: 0,
         startPage: 1,
-        endPage: docTotal,
+        endPage: calculatedTotal,
         processingMode,
         concurrency,
         multiPdfMode,
       });
+
+      // Background preview thumbnails if files are light enough (< 50MB)
+      const totalSize = files.reduce((acc, f) => acc + f.size, 0);
+      if (totalSize < 50 * 1024 * 1024) {
+        pdfApi.extractPreview(files, 1, Math.min(calculatedTotal, 5)).catch(() => {});
+      }
+    } catch (err) {
+      console.warn("Client page calculation warning", err);
+      setEndPage(files.length);
+      setTotalPdfDocPages(files.length);
     }
   };
 
@@ -1414,7 +1430,7 @@ export default function Home() {
                       : "bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800"
                   }`}
                 >
-                  All Documents ({pages.length} Pages)
+                  All Documents ({pages.length > 0 ? `${pages.length} / ${totalPdfDocPages}` : `${totalPdfDocPages || 0} Pages`})
                 </button>
 
                 {distinctDocuments.map((docName) => {
