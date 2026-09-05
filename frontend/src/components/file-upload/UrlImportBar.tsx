@@ -178,7 +178,7 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
 
             {/* Backend Database Store Detected Panel */}
             {storeInspection?.is_store && storeInspection.pdfs && (
-              <div className="rounded-2xl bg-gradient-to-b from-indigo-950/60 via-slate-900/90 to-indigo-950/40 border border-indigo-500/40 p-4 space-y-3.5 shadow-2xl animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="rounded-2xl bg-[#070A12] border border-slate-800 p-4 space-y-3.5 shadow-xl animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center space-x-2.5">
                     <div className="h-9 w-9 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400 shrink-0">
@@ -260,7 +260,7 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
                   type="button"
                   onClick={handleConvertUrlToTxt}
                   disabled={isConvertingUrl || isProcessing}
-                  className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-indigo-600 hover:from-indigo-500 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2 transition-all cursor-pointer"
+                  className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md flex items-center justify-center space-x-2 transition-all cursor-pointer"
                 >
                   {isConvertingUrl || isProcessing ? (
                     <>
@@ -298,7 +298,7 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
               type="button"
               onClick={handleConvertUrlToTxt}
               disabled={isConvertingUrl || isFetchingUrl || isProcessing || !urlInput.trim()}
-              className="w-full py-3.5 px-6 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-indigo-600 hover:from-indigo-500 hover:to-indigo-400 disabled:opacity-50 text-white text-xs sm:text-sm font-bold shadow-xl shadow-indigo-600/30 flex items-center justify-center space-x-2 transition-all cursor-pointer"
+              className="w-full py-3.5 px-6 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs sm:text-sm font-bold shadow-md flex items-center justify-center space-x-2 transition-all cursor-pointer"
               title="API Server fetches PDF directly, runs Vision OCR/correction, and saves .txt & .jsonl to disk without browser download"
             >
               {isConvertingUrl || (isProcessing && activeFilesCount === 0) ? (
@@ -408,7 +408,7 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
               type="button"
               onClick={handleConvertBatchUrlsToTxt}
               disabled={isProcessingBatch || isProcessing || !batchUrlsInput.trim()}
-              className="w-full py-3.5 px-6 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-indigo-600 hover:from-indigo-500 hover:to-indigo-400 disabled:opacity-50 text-white text-xs sm:text-sm font-bold shadow-xl shadow-indigo-600/30 flex items-center justify-center space-x-2 transition-all cursor-pointer"
+              className="w-full py-3.5 px-6 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs sm:text-sm font-bold shadow-md flex items-center justify-center space-x-2 transition-all cursor-pointer"
             >
               {isProcessingBatch ? (
                 <>

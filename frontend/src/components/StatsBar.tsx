@@ -603,7 +603,7 @@ export const StatsBar: React.FC<StatsBarProps> = ({
         <div className="h-2.5 w-full bg-slate-800 rounded-full overflow-hidden p-0.5 border border-slate-700/50">
           <div
             className={`h-full rounded-full transition-all duration-300 ${isProcessing
-                ? "bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-500 bg-[length:200%_100%] animate-pulse"
+                ? "bg-indigo-600 animate-pulse"
                 : completedPages === totalPages
                   ? "bg-emerald-500 shadow-md shadow-emerald-500/30"
                   : "bg-indigo-600"
