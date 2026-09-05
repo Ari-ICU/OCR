@@ -13,6 +13,8 @@ import {
   Zap,
   SlidersHorizontal,
   FileUp,
+  X,
+  Layers,
 } from "lucide-react";
 import { InspectStoreResult } from "../../types";
 
@@ -74,15 +76,15 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
   const [showPageRange, setShowPageRange] = useState(false);
 
   return (
-    <div className="border border-slate-800 rounded-3xl p-6 sm:p-8 bg-[#0D1322] shadow-2xl space-y-5">
+    <div className="border border-slate-800 rounded-3xl p-6 sm:p-8 bg-[#0D1322] shadow-xl space-y-5">
       {/* Header */}
       <div className="text-center space-y-1.5">
-        <div className="inline-flex items-center justify-center h-12 w-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 shadow-lg shadow-indigo-500/10">
+        <div className="inline-flex items-center justify-center h-12 w-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
           <Zap className="h-6 w-6 text-indigo-400" />
         </div>
-        <h3 className="text-sm sm:text-base font-bold text-white flex items-center justify-center gap-2">
+        <h3 className="text-sm sm:text-base font-semibold text-white flex items-center justify-center gap-2">
           <span>Server & Database PDF ➔ TXT</span>
-          <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+          <span className="text-[10px] uppercase font-semibold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
             Zero Local Download
           </span>
         </h3>
@@ -97,24 +99,26 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
           <button
             type="button"
             onClick={() => setUrlMode("single")}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+            className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
               urlMode === "single"
-                ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20"
+                ? "bg-indigo-600 text-white shadow-sm font-semibold"
                 : "text-slate-400 hover:text-slate-200"
             }`}
           >
-            🔗 Single / Database API URL
+            <LinkIcon className="h-3 w-3" />
+            <span>Single / Database API</span>
           </button>
           <button
             type="button"
             onClick={() => setUrlMode("batch")}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+            className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
               urlMode === "batch"
-                ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20"
+                ? "bg-indigo-600 text-white shadow-sm font-semibold"
                 : "text-slate-400 hover:text-slate-200"
             }`}
           >
-            📑 Multi-Line URLs
+            <Layers className="h-3 w-3" />
+            <span>Multi-Line URLs</span>
           </button>
         </div>
       </div>
@@ -141,9 +145,9 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
                       handleConvertUrlToTxt();
                     }
                   }}
-                  placeholder="Paste PDF link or database API endpoint (e.g. http://my-store/api/documents)..."
+                  placeholder="Paste PDF link or database API endpoint..."
                   disabled={isFetchingUrl || isConvertingUrl || isProcessing || isInspecting}
-                  className="w-full bg-[#070A12] border border-slate-700/80 hover:border-indigo-500/50 rounded-xl pl-10 pr-9 py-3 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-inner font-mono transition-colors"
+                  className="w-full bg-[#070A12] border border-slate-800 hover:border-slate-700 focus:border-indigo-500 rounded-xl pl-10 pr-9 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none shadow-inner font-mono transition-colors"
                 />
                 {urlInput && (
                   <button
@@ -152,10 +156,10 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
                       setUrlInput("");
                       setStoreInspection(null);
                     }}
-                    className="absolute right-2.5 text-slate-500 hover:text-slate-300 p-1 text-xs font-bold cursor-pointer"
+                    className="absolute right-2.5 text-slate-500 hover:text-slate-300 p-1 text-xs cursor-pointer"
                     title="Clear URL"
                   >
-                    ✕
+                    <X className="h-3.5 w-3.5" />
                   </button>
                 )}
               </div>
@@ -164,13 +168,13 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
                 type="button"
                 onClick={() => handleInspectStoreUrl()}
                 disabled={isInspecting || !urlInput.trim()}
-                className="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 active:bg-slate-600 border border-slate-700 hover:border-indigo-500/50 text-slate-200 hover:text-white text-xs font-semibold flex items-center justify-center space-x-1.5 transition-all shrink-0 cursor-pointer disabled:opacity-40"
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:bg-slate-600 border border-slate-700/80 text-slate-200 hover:text-white text-xs font-medium flex items-center justify-center space-x-1.5 transition-all shrink-0 cursor-pointer disabled:opacity-40"
                 title="Scan if this URL has 1 or multiple PDFs in a database"
               >
                 {isInspecting ? (
-                  <Loader2 className="h-4 w-4 animate-spin text-indigo-400" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-400" />
                 ) : (
-                  <Search className="h-4 w-4 text-indigo-400" />
+                  <Search className="h-3.5 w-3.5 text-indigo-400" />
                 )}
                 <span>Scan Store</span>
               </button>
@@ -178,23 +182,23 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
 
             {/* Backend Database Store Detected Panel */}
             {storeInspection?.is_store && storeInspection.pdfs && (
-              <div className="rounded-2xl bg-[#070A12] border border-slate-800 p-4 space-y-3.5 shadow-xl animate-in fade-in slide-in-from-top-2 duration-300">
-                <div className="flex items-start justify-between gap-3">
+              <div className="rounded-2xl bg-[#0B0F19] border border-slate-800 p-4 space-y-3 shadow-lg animate-in fade-in duration-200">
+                <div className="flex items-start justify-between gap-3 pb-1 border-b border-slate-800/80">
                   <div className="flex items-center space-x-2.5">
-                    <div className="h-9 w-9 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400 shrink-0">
-                      <Database className="h-5 w-5" />
+                    <div className="h-8 w-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
+                      <Database className="h-4 w-4" />
                     </div>
                     <div>
                       <div className="flex items-center space-x-2">
-                        <h4 className="text-xs sm:text-sm font-bold text-white">
+                        <h4 className="text-xs sm:text-sm font-semibold text-white">
                           Database Store Detected
                         </h4>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                           {storeInspection.total_pdfs} PDFs Ready
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-400 font-khmer">
-                        អាសយដ្ឋាន API នេះផ្ទុកឯកសារ PDF ចំនួន {storeInspection.total_pdfs} ក្នុង Database — ការបំប្លែងនឹងធ្វើឡើងផ្ទាល់នៅលើ Server
+                        រកឃើញឯកសារ PDF ចំនួន {storeInspection.total_pdfs} ក្នុង Database — ការបំប្លែងនឹងធ្វើឡើងផ្ទាល់នៅលើ Server
                       </p>
                     </div>
                   </div>
@@ -202,10 +206,10 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
                   <button
                     type="button"
                     onClick={() => setStoreInspection(null)}
-                    className="text-slate-400 hover:text-white text-xs p-1 cursor-pointer"
+                    className="text-slate-500 hover:text-slate-300 text-xs p-1 cursor-pointer transition-colors"
                     title="Close preview"
                   >
-                    ✕
+                    <X className="h-4 w-4" />
                   </button>
                 </div>
 
@@ -214,20 +218,20 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
                   {storeInspection.pdfs.map((pdf, idx) => (
                     <div
                       key={idx}
-                      className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition-all text-xs"
+                      className="flex items-center justify-between p-2 rounded-xl bg-[#070A12] border border-slate-800/80 hover:border-slate-700 transition-all text-xs"
                     >
                       <div className="flex items-center space-x-2.5 min-w-0 flex-1 mr-2">
-                        <span className="text-[10px] font-mono font-bold text-slate-500 px-1.5 py-0.5 rounded bg-slate-800 shrink-0">
+                        <span className="text-[10px] font-mono font-semibold text-slate-500 px-1.5 py-0.5 rounded bg-slate-800/80 shrink-0">
                           #{idx + 1}
                         </span>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center space-x-1.5">
                             <FileText className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-                            <span className="font-semibold text-white truncate" title={pdf.title}>
+                            <span className="font-medium text-slate-200 truncate" title={pdf.title}>
                               {pdf.title}
                             </span>
                             {pdf.source_id && (
-                              <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-1.5 py-0.2 rounded shrink-0">
+                              <span className="text-[10px] font-mono text-slate-400 bg-slate-800/80 px-1.5 py-0.5 rounded shrink-0">
                                 ID: {pdf.source_id}
                               </span>
                             )}
@@ -247,7 +251,7 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
                           }
                         }}
                         disabled={isConvertingUrl || isProcessing}
-                        className="shrink-0 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-600/60 hover:text-white text-slate-300 text-[11px] font-medium border border-slate-700 transition-colors cursor-pointer"
+                        className="shrink-0 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-600 hover:text-white text-slate-300 text-[11px] font-medium border border-slate-700/60 transition-colors cursor-pointer"
                       >
                         Convert This
                       </button>
@@ -255,22 +259,22 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
                   ))}
                 </div>
 
-                {/* Convert All Button */}
+                {/* Single Clear Action for Database Store */}
                 <button
                   type="button"
                   onClick={handleConvertUrlToTxt}
                   disabled={isConvertingUrl || isProcessing}
-                  className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md flex items-center justify-center space-x-2 transition-all cursor-pointer"
+                  className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm flex items-center justify-center space-x-2 transition-all cursor-pointer"
                 >
                   {isConvertingUrl || isProcessing ? (
                     <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <Loader2 className="h-4 w-4 animate-spin text-white" />
                       <span>Streaming All {storeInspection.total_pdfs} PDFs ➔ TXT on Server...</span>
                     </>
                   ) : (
                     <>
                       <Sparkles className="h-4 w-4 text-indigo-200" />
-                      <span>⚡ Convert All ({storeInspection.total_pdfs}) PDFs ➔ TXT (Server Direct)</span>
+                      <span>Convert All ({storeInspection.total_pdfs}) PDFs ➔ TXT (Server Direct)</span>
                     </>
                   )}
                 </button>
@@ -279,40 +283,42 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
 
             {/* Direct PDF Detection Alert */}
             {storeInspection?.is_direct_pdf && (
-              <div className="flex items-center space-x-2 p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-xs text-emerald-300 animate-in fade-in duration-200">
+              <div className="flex items-center space-x-2 p-2.5 rounded-xl bg-emerald-950/20 border border-emerald-500/20 text-xs text-emerald-300 animate-in fade-in duration-200">
                 <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-                <span>Direct PDF File Verified: <strong className="text-white font-mono">{storeInspection.filename}</strong></span>
+                <span>Direct PDF Verified: <strong className="text-white font-mono">{storeInspection.filename}</strong></span>
               </div>
             )}
 
             {/* Inspection Message */}
             {storeInspection && !storeInspection.is_store && !storeInspection.is_direct_pdf && storeInspection.message && (
-              <div className="flex items-center space-x-2 p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/30 text-xs text-amber-300 animate-in fade-in duration-200">
+              <div className="flex items-center space-x-2 p-2.5 rounded-xl bg-amber-950/20 border border-amber-500/20 text-xs text-amber-300 animate-in fade-in duration-200">
                 <AlertCircle className="h-4 w-4 text-amber-400 shrink-0" />
                 <span>{storeInspection.message}</span>
               </div>
             )}
 
-            {/* Primary Big Action Button */}
-            <button
-              type="button"
-              onClick={handleConvertUrlToTxt}
-              disabled={isConvertingUrl || isFetchingUrl || isProcessing || !urlInput.trim()}
-              className="w-full py-3.5 px-6 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs sm:text-sm font-bold shadow-md flex items-center justify-center space-x-2 transition-all cursor-pointer"
-              title="API Server fetches PDF directly, runs Vision OCR/correction, and saves .txt & .jsonl to disk without browser download"
-            >
-              {isConvertingUrl || (isProcessing && activeFilesCount === 0) ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin text-white" />
-                  <span>Converting & Saving on Server (Live Streaming)...</span>
-                </>
-              ) : (
-                <>
-                  <Zap className="h-4 w-4 text-amber-300 fill-amber-300" />
-                  <span>⚡ Convert PDF ➔ TXT (Server Direct)</span>
-                </>
-              )}
-            </button>
+            {/* Primary Action Button - Hidden when Database Store Detected (which has its own single action above) */}
+            {!storeInspection?.is_store && (
+              <button
+                type="button"
+                onClick={handleConvertUrlToTxt}
+                disabled={isConvertingUrl || isFetchingUrl || isProcessing || !urlInput.trim()}
+                className="w-full py-3 px-6 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs sm:text-sm font-semibold shadow-sm flex items-center justify-center space-x-2 transition-all cursor-pointer"
+                title="API Server fetches PDF directly, runs Vision OCR/correction, and saves .txt & .jsonl to disk without browser download"
+              >
+                {isConvertingUrl || (isProcessing && activeFilesCount === 0) ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin text-white" />
+                    <span>Converting & Saving on Server (Live Streaming)...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="h-4 w-4 text-amber-300 fill-amber-300" />
+                    <span>Convert PDF ➔ TXT (Server Direct)</span>
+                  </>
+                )}
+              </button>
+            )}
 
             {/* Secondary Options Bar (Collapsible Page Range & Workspace Preview) */}
             <div className="flex items-center justify-between text-xs pt-0.5">
@@ -322,7 +328,7 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
                 className="text-slate-400 hover:text-slate-200 flex items-center space-x-1.5 transition-colors py-1 cursor-pointer"
               >
                 <SlidersHorizontal className="h-3.5 w-3.5 text-indigo-400" />
-                <span>{showPageRange ? "Hide Page Range" : "⚙️ Page Range (Optional Slice)"}</span>
+                <span>{showPageRange ? "Hide Page Range" : "Page Range (Optional Slice)"}</span>
               </button>
 
               <button
@@ -340,7 +346,7 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
                 ) : (
                   <>
                     <FileUp className="h-3.5 w-3.5" />
-                    <span>📄 Load in Workspace</span>
+                    <span>Load in Workspace</span>
                   </>
                 )}
               </button>
@@ -408,17 +414,17 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
               type="button"
               onClick={handleConvertBatchUrlsToTxt}
               disabled={isProcessingBatch || isProcessing || !batchUrlsInput.trim()}
-              className="w-full py-3.5 px-6 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs sm:text-sm font-bold shadow-md flex items-center justify-center space-x-2 transition-all cursor-pointer"
+              className="w-full py-3 px-6 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs sm:text-sm font-semibold shadow-sm flex items-center justify-center space-x-2 transition-all cursor-pointer"
             >
               {isProcessingBatch ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin text-white" />
                   <span>Converting Batch URLs ➔ TXT on Server...</span>
                 </>
               ) : (
                 <>
                   <Sparkles className="h-4 w-4 text-indigo-200" />
-                  <span>⚡ Convert All URLs ➔ TXT (Batch Direct)</span>
+                  <span>Convert All URLs ➔ TXT (Batch Direct)</span>
                 </>
               )}
             </button>
@@ -440,10 +446,10 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
                 setUrlInput(sampleUrl);
                 handleInspectStoreUrl(sampleUrl);
               }}
-              className="px-3 py-1.5 rounded-xl bg-indigo-950/60 hover:bg-indigo-900/80 text-indigo-200 hover:text-white border border-indigo-500/40 text-xs transition-all font-medium flex items-center gap-1.5 shadow-sm cursor-pointer"
+              className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 text-xs transition-all font-medium flex items-center gap-1.5 cursor-pointer"
             >
               <Database className="h-3.5 w-3.5 text-indigo-400" />
-              <span>🗄️ Database API (1 URL ➔ 2 PDFs)</span>
+              <span>Database API (2 PDFs)</span>
             </button>
             <button
               type="button"
@@ -455,7 +461,7 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
               className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 text-xs transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <FileText className="h-3.5 w-3.5 text-slate-400" />
-              <span>📜 Remote MoSVY PDF</span>
+              <span>Remote MoSVY PDF</span>
             </button>
             <button
               type="button"
@@ -467,7 +473,7 @@ export const UrlImportBar: React.FC<UrlImportBarProps> = ({
               className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 text-xs transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <FileText className="h-3.5 w-3.5 text-slate-400" />
-              <span>📄 Local Binder1 PDF</span>
+              <span>Local Binder1 PDF</span>
             </button>
           </div>
         </div>

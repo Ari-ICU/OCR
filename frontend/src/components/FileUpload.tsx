@@ -327,13 +327,13 @@ export const FileUpload: React.FC<FileUploadProps> = ({
               onClick={() => setActiveTab("url")}
               className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                 activeTab === "url"
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+                  ? "bg-indigo-600 text-white shadow-sm"
                   : "bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800"
               }`}
             >
               <LinkIcon className="h-3.5 w-3.5 text-indigo-300" />
-              <span>🌐 Server Store / URL</span>
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 font-bold">
+              <span>Server Store / URL</span>
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-500/10 text-emerald-400 font-semibold border border-emerald-500/20">
                 Direct ➔ TXT
               </span>
             </button>
@@ -342,12 +342,12 @@ export const FileUpload: React.FC<FileUploadProps> = ({
               onClick={() => setActiveTab("file")}
               className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                 activeTab === "file"
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+                  ? "bg-indigo-600 text-white shadow-sm"
                   : "bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800"
               }`}
             >
               <FileUp className="h-3.5 w-3.5" />
-              <span>📁 Upload Local Files</span>
+              <span>Upload Local Files</span>
             </button>
           </div>
 
