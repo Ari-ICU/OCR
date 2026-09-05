@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { Navbar, ModelInfo, NavTab } from "../components/Navbar";
+import { Navbar } from "../components/Navbar";
 import { FileUpload } from "../components/FileUpload";
-import { PageCard, PageResult } from "../components/PageCard";
+import { PageCard } from "../components/PageCard";
 import { StatsBar } from "../components/StatsBar";
 import { PageGridNavigator } from "../components/PageGridNavigator";
 import { ProcessingBackbone } from "../components/ProcessingBackbone";
@@ -17,7 +17,8 @@ import {
   Files,
   FileText,
 } from "lucide-react";
-import { FileBreakdownItem } from "../components/FileUpload";
+import { ModelInfo, NavTab, PageResult, FileBreakdownItem } from "../types";
+import { pdfApi } from "../services";
 import { detectKhmerErrors } from "../utils/khmerValidator";
 
 import {
@@ -335,18 +336,24 @@ export default function Home() {
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
 
+  // Abort ongoing requests and notify backend
+  const abortAndCancelProcessing = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    pdfApi.cancelAllProcessing();
+    setIsProcessing(false);
+    setActiveWorkerPages([]);
+  }, []);
+
   // Check backend health & fetch models list
   const checkBackendHealth = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/health`);
-      if (res.ok) {
-        setBackendHealthy(true);
-        const data = await res.json();
-        if (data.active_models) {
-          setModelsList(data.active_models);
-        }
-      } else {
-        setBackendHealthy(false);
+      const data = await pdfApi.fetchHealth();
+      setBackendHealthy(true);
+      if (data.active_models) {
+        setModelsList(data.active_models);
       }
     } catch {
       setBackendHealthy(false);
@@ -363,14 +370,7 @@ export default function Home() {
   const handleFilesSelected = async (files: File[]) => {
     if (!files || files.length === 0) return;
 
-    // Immediately stop and abort any ongoing OCR processing
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    fetch(`${API_BASE_URL}/api/cancel-all-processing`, { method: "POST" }).catch(() => {});
-    setIsProcessing(false);
-    setActiveWorkerPages([]);
+    abortAndCancelProcessing();
 
     setSelectedFiles(files);
     setSelectedFile(files[0]);
@@ -382,28 +382,15 @@ export default function Home() {
     setSessionRestored(false);
     setSelectedDocFilter("all");
 
-    const formData = new FormData();
-    for (const f of files) {
-      formData.append("files", f);
-    }
-
     let docTotal = files.length;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/extract-preview`, {
-        method: "POST",
-        body: formData,
-      });
-      if (res.ok) {
-        const data = await res.json();
-        docTotal = data.total_pages || files.length;
-        if (data.files && Array.isArray(data.files)) {
-          setFilesBreakdown(data.files);
-        }
-        setTotalPdfDocPages(docTotal);
-        setEndPage(docTotal);
-      } else {
-        setEndPage(files.length);
+      const data = await pdfApi.extractPreview(files, 1, null);
+      docTotal = data.total_pages || files.length;
+      if (data.files && Array.isArray(data.files)) {
+        setFilesBreakdown(data.files);
       }
+      setTotalPdfDocPages(docTotal);
+      setEndPage(docTotal);
     } catch (err) {
       console.warn("Preview load error", err);
       setEndPage(files.length);
@@ -434,13 +421,7 @@ export default function Home() {
     filename: string,
     totalDocPages?: number
   ) => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    fetch(`${API_BASE_URL}/api/cancel-all-processing`, { method: "POST" }).catch(() => {});
-    setIsProcessing(false);
-    setActiveWorkerPages([]);
+    abortAndCancelProcessing();
 
     const convertedPages: PageResult[] = serverPages.map((p, idx) => {
       const pText = p.corrected_text || p.text || p.raw_text || "";
@@ -494,13 +475,7 @@ export default function Home() {
   };
 
   const handleClearExtractedPages = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    fetch(`${API_BASE_URL}/api/cancel-all-processing`, { method: "POST" }).catch(() => {});
-    setIsProcessing(false);
-    setActiveWorkerPages([]);
+    abortAndCancelProcessing();
 
     setPages([]);
     setTotalPages(0);
@@ -521,13 +496,7 @@ export default function Home() {
   };
 
   const handleClearAllSession = async () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    fetch(`${API_BASE_URL}/api/cancel-all-processing`, { method: "POST" }).catch(() => {});
-    setIsProcessing(false);
-    setActiveWorkerPages([]);
+    abortAndCancelProcessing();
 
     setSelectedFile(null);
     setSelectedFiles([]);
@@ -837,13 +806,7 @@ export default function Home() {
   };
 
   const handleCancelProcessing = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    fetch(`${API_BASE_URL}/api/cancel-all-processing`, { method: "POST" }).catch(() => {});
-    setIsProcessing(false);
-    setActiveWorkerPages([]);
+    abortAndCancelProcessing();
     setPages((prev) => {
       const cleaned = prev.map((p) => (p.isProcessing ? { ...p, isProcessing: false } : p));
       persistPagesOnly(cleaned);
@@ -936,7 +899,31 @@ export default function Home() {
             const data = JSON.parse(dataStr);
             const actualType = data.type || eventType;
 
-            if (actualType === "init") {
+            if (actualType === "store_init") {
+              setMultiPdfMode("batch");
+              if (data.documents && Array.isArray(data.documents)) {
+                const dummyFiles = data.documents.map(
+                  (d: any) => new File([], d.filename || d.title, { type: "application/pdf" })
+                );
+                setSelectedFiles(dummyFiles);
+                if (dummyFiles.length > 0 && !selectedFile) {
+                  setSelectedFile(dummyFiles[0]);
+                }
+              }
+            } else if (actualType === "doc_start") {
+              setMultiPdfMode("batch");
+              if (data.filename) {
+                setSelectedFiles((prev) => {
+                  if (prev.some((f) => f.name === data.filename)) return prev;
+                  return [...prev, new File([], data.filename, { type: "application/pdf" })];
+                });
+                if (!selectedFile) {
+                  setSelectedFile(new File([], data.filename, { type: "application/pdf" }));
+                }
+              }
+            } else if (actualType === "doc_done") {
+              // Individual document from backend database store finished and saved to disk
+            } else if (actualType === "init") {
               const docTotal = data.total_pages || 0;
               setTotalPdfDocPages(docTotal);
               setTotalPages(data.selected_count || docTotal);
@@ -1087,21 +1074,15 @@ export default function Home() {
       const effectiveProvider = getProviderForModel(activeModel);
       const effectiveKey = effectiveProvider === "huggingface" ? (hfKey || undefined) : (apiKey || undefined);
 
-      const res = await fetch(`${API_BASE_URL}/api/reprocess-page`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          raw_text: pageItem.raw_text,
-          page_number: pageNum,
-          api_key: effectiveKey,
-          model: activeModel || undefined,
-          provider: effectiveProvider,
-          mode: processingMode,
-          image_base64: pageItem.thumbnail || undefined,
-        }),
+      const data = await pdfApi.reprocessPage({
+        raw_text: pageItem.raw_text,
+        page_number: pageNum,
+        api_key: effectiveKey,
+        model: activeModel || undefined,
+        provider: effectiveProvider,
+        mode: processingMode,
+        image_base64: pageItem.thumbnail || undefined,
       });
-
-      const data = await res.json();
       setPages((prev) => {
         const updated = prev.map((p) =>
           p.page_number === pageNum

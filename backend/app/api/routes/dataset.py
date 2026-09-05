@@ -1,443 +1,103 @@
-import re
-import json
 import time
-import uuid
-import urllib.parse
-import httpx
 from pathlib import Path
-from typing import Optional, Tuple
-from fastapi import APIRouter, HTTPException
+from typing import List, Dict, Any
+from fastapi import APIRouter
 from fastapi.responses import StreamingResponse, FileResponse
-from pydantic import BaseModel, Field
-
-try:
-    import pymupdf as fitz
-except ImportError:
-    import fitz
 
 from app.core.config import settings
-from app.core.security import sanitize_filename, is_safe_url
-from app.api.routes.pdf import transform_cloud_url
-from app.services.pdf_service import PDFService
-from app.services.ai_service import AIService
-from app.services.log_service import log_manager
+from app.models.dataset import (
+    InspectUrlRequest,
+    UrlConvertToTxtRequest,
+    BatchStoreConvertToTxtRequest,
+    DatasetFileItem
+)
+from app.services.dataset_service import DatasetService
 
-router = APIRouter(prefix="/dataset", tags=["Server Store PDF-to-TXT"])
-
-
-class UrlConvertToTxtRequest(BaseModel):
-    url: str = Field(..., description="PDF URL from server store, cloud link, or web")
-    start_page: int = Field(1, ge=1, description="Start page (1-indexed)")
-    end_page: Optional[int] = Field(None, description="End page (inclusive)")
-    mode: str = Field("vision", description="Conversion mode: 'vision' or 'text'")
-    provider: str = Field("gemini", description="AI provider: 'gemini' or 'ollama'")
-    model: Optional[str] = Field(None, description="Model override (e.g. gemini-3.7-flash)")
-    dpi: int = Field(200, ge=72, le=300, description="DPI for vision OCR")
-    use_ai: bool = Field(True, description="Whether to apply AI correction (if False, fast text extraction)")
-    save_to_txt: bool = Field(True, description="Automatically save .txt to ./txt/ on server disk")
-    save_to_jsonl: bool = Field(True, description="Automatically save clean .jsonl to ./jsonl/ on server disk")
-    save_to_pdf_dataset: bool = Field(True, description="Save downloaded PDF to ./pdf/ dataset on server")
-    api_key: Optional[str] = Field(None, description="Optional user API key override")
+router = APIRouter(prefix="/dataset", tags=["Backend Database Store & PDF-to-TXT"])
 
 
 @router.get("/file/{filename:path}")
-def get_server_store_test_file(filename: str):
+def get_server_store_test_file(filename: str) -> FileResponse:
     """
-    Lightweight endpoint to serve a sample PDF from server store (./pdf) for testing purposes.
+    Lightweight endpoint to serve a PDF from the server store (./pdf) for preview/download.
     """
-    safe_name = sanitize_filename(filename)
-    target_path = settings.DATASET_DIR / safe_name
-    if not target_path.exists() or not target_path.is_file():
-        raise HTTPException(status_code=404, detail=f"File '{safe_name}' not found.")
-
-    ascii_name = urllib.parse.quote(safe_name)
-    headers = {
-        "Content-Disposition": f"inline; filename*=UTF-8''{ascii_name}"
-    }
-    return FileResponse(path=str(target_path), media_type="application/pdf", headers=headers)
+    return DatasetService.get_dataset_file(filename)
 
 
-async def fetch_pdf_bytes_from_url(url_str: str) -> Tuple[str, bytes]:
+@router.get("/sample-database-api")
+def sample_backend_database_api() -> Dict[str, Any]:
     """
-    Downloads a PDF from a remote server store, cloud link, or web URL into server memory
-    with SSRF protection, size validation, and filename detection.
+    Demonstration backend database API endpoint that returns a JSON list of PDFs
+    stored in the database collection.
     """
-    clean_url = transform_cloud_url(url_str.strip())
-    
-    # SSRF Protection
-    is_safe, reason = is_safe_url(clean_url)
-    if not is_safe:
-        raise HTTPException(status_code=403, detail=f"Security rejection: {reason}")
-        
-    # Special resolver for interior.gov.kh library detail link
-    interior_match = re.search(r'interior\.gov\.kh/(?:(?:kh|en)/)?library/detail/([a-zA-Z0-9_-]+)', clean_url)
-    if interior_match:
-        doc_hash = interior_match.group(1)
-        try:
-            with httpx.Client(verify=True, timeout=10.0) as temp_client:
-                api_res = temp_client.get(f"https://web-api.interior.gov.kh/api/v1/public/document/{doc_hash}")
-                if api_res.status_code == 200:
-                    api_json = api_res.json()
-                    direct_file = api_json.get("data", {}).get("file_url")
-                    if direct_file:
-                        safe_df, _ = is_safe_url(direct_file)
-                        if safe_df:
-                            clean_url = direct_file
-        except Exception:
-            pass
-
-    max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
-    try:
-        async with httpx.AsyncClient(
-            follow_redirects=True,
-            timeout=60.0,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/120.0.0.0",
-                "Accept": "*/*",
-                "Accept-Language": "km,en-US;q=0.9,en;q=0.8"
+    return {
+        "status": "success",
+        "database": "khmer_government_records",
+        "timestamp": int(time.time()),
+        "total": 2,
+        "data": [
+            {
+                "id": "rec_001",
+                "title": "Binder1 Official Record",
+                "category": "Administration",
+                "file_url": "http://localhost:8000/api/dataset/file/1787540635_Binder1.pdf",
+                "pages": 4
+            },
+            {
+                "id": "rec_002",
+                "title": "MoSVY Prakas on CTP-PF Implementation",
+                "category": "Social Protection",
+                "file_url": "https://mosvy.gov.kh/wp-content/uploads/2021/11/02-Prakas-on-CTP-PF-Implementation.pdf",
+                "pages": 18
             }
-        ) as client:
-            resp = await client.get(clean_url)
-            if resp.status_code != 200:
-                raise HTTPException(status_code=400, detail=f"Failed to fetch PDF from URL (HTTP {resp.status_code}).")
-            
-            final_url = str(resp.url)
-            final_safe, final_reason = is_safe_url(final_url)
-            if not final_safe:
-                raise HTTPException(status_code=403, detail=f"Security rejection on redirect: {final_reason}")
+        ]
+    }
 
-            raw_content = resp.content
-            if not raw_content or len(raw_content) == 0:
-                raise HTTPException(status_code=400, detail="The provided URL returned an empty file.")
 
-            if len(raw_content) > max_bytes:
-                raise HTTPException(status_code=413, detail=f"File exceeds maximum permitted size of {settings.MAX_UPLOAD_SIZE_MB}MB.")
-
-            # Determine filename
-            cd = resp.headers.get("content-disposition", "")
-            filename = None
-            if "filename=" in cd:
-                match = re.search(r'filename=["\']?([^"\';]+)["\']?', cd)
-                if match:
-                    filename = match.group(1).strip()
-
-            if not filename:
-                parsed_path = urllib.parse.urlparse(clean_url).path
-                base = parsed_path.split("/")[-1].strip()
-                if base and base.lower().endswith(".pdf"):
-                    filename = urllib.parse.unquote(base)
-
-            if not filename:
-                filename = f"url_doc_{int(time.time())}.pdf"
-            elif not filename.lower().endswith(".pdf"):
-                filename += ".pdf"
-
-            filename = sanitize_filename(filename, default="url_document.pdf")
-            return filename, raw_content
-    except httpx.RequestError as e:
-        raise HTTPException(status_code=400, detail=f"Network error when accessing URL: {str(e)}")
+@router.post("/inspect-url")
+async def inspect_server_store_url(req: InspectUrlRequest) -> Dict[str, Any]:
+    """
+    Inspects a remote URL to detect if it's a direct PDF, an HTML index, or a JSON database API with PDF records.
+    """
+    return await DatasetService.inspect_server_store_url(req)
 
 
 @router.post("/url-to-txt")
-async def convert_url_pdf_to_txt(req: UrlConvertToTxtRequest):
+async def convert_url_pdf_to_txt(req: UrlConvertToTxtRequest) -> Dict[str, Any]:
     """
-    Direct Server-Side URL-to-TXT Conversion:
-    Fetches the PDF directly on the API server from the provided URL,
-    converts it to clean text & LaTeX on the server,
-    saves the .txt to ./txt/ and .jsonl to ./jsonl/, and returns the text in the response.
-    Zero browser PDF downloads required!
+    Direct Server-Side URL-to-TXT Conversion for a single PDF URL (synchronous JSON response).
     """
-    filename, content = await fetch_pdf_bytes_from_url(req.url)
-
-    if req.save_to_pdf_dataset:
-        pdf_path = settings.DATASET_DIR / filename
-        try:
-            pdf_path.write_bytes(content)
-        except Exception:
-            pass
-
-    try:
-        doc = fitz.open(stream=content, filetype="pdf")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse PDF document from URL: {str(e)}")
-
-    total_doc_pages = len(doc)
-    start_idx = max(0, req.start_page - 1)
-    end_idx = min(total_doc_pages, req.end_page) if req.end_page else total_doc_pages
-
-    session_id = f"sess_url_{uuid.uuid4().hex[:8]}"
-    AIService.set_active_session(session_id)
-
-    log_manager.emit(
-        level="INFO",
-        event="SERVER_URL_TO_TXT_START",
-        message=f"🌐 Converting PDF from URL '{req.url[:60]}...' (Doc: {filename}, Pages {start_idx + 1}-{end_idx}) directly on server...",
-        model=req.model or "gemini-3.7-flash"
-    )
-
-    pages_result = []
-    txt_blocks = []
-    jsonl_records = []
-
-    for page_idx in range(start_idx, end_idx):
-        page_num = page_idx + 1
-        page = doc[page_idx]
-
-        if AIService.is_cancelled(session_id):
-            break
-
-        is_blank = PDFService.is_page_blank(page)
-        if is_blank:
-            clean_text = "[ទំព័រទទេ / Blank Page]"
-            pages_result.append({
-                "page_number": page_num,
-                "file_name": filename,
-                "raw_text": "",
-                "corrected_text": clean_text,
-                "is_blank": True,
-                "model_used": "blank-skipped"
-            })
-            txt_blocks.append(f"=== Page {page_num} ===\n\n{clean_text}\n\n")
-            continue
-
-        raw_text = page.get_text("text").strip()
-
-        if not req.use_ai:
-            clean_text = raw_text
-            model_used = "pymupdf-direct"
-        else:
-            if req.mode == "vision":
-                img_bytes = PDFService.render_page_image_bytes(page, dpi=req.dpi)
-                res = await AIService.process_page_vision_async(
-                    image_bytes=img_bytes,
-                    page_number=page_num,
-                    provider=req.provider,
-                    preferred_model=req.model,
-                    session_id=session_id,
-                    api_key=req.api_key
-                )
-            else:
-                res = await AIService.process_page_text_async(
-                    raw_text=raw_text,
-                    page_number=page_num,
-                    provider=req.provider,
-                    preferred_model=req.model,
-                    session_id=session_id,
-                    api_key=req.api_key
-                )
-            clean_text = res.get("corrected_text") or raw_text
-            model_used = res.get("model_used") or req.model or "gemini"
-
-        pages_result.append({
-            "page_number": page_num,
-            "file_name": filename,
-            "raw_text": raw_text,
-            "corrected_text": clean_text,
-            "char_count": len(clean_text),
-            "word_count": len(clean_text.split()),
-            "model_used": model_used
-        })
-
-        txt_blocks.append(f"=== Page {page_num} ===\n\n{clean_text}\n\n")
-
-        if not is_blank and clean_text.strip():
-            jsonl_records.append(json.dumps({
-                "document": filename,
-                "page": page_num,
-                "doc_page": page_num,
-                "text": clean_text.strip(),
-                "char_count": len(clean_text.strip()),
-                "word_count": len(clean_text.strip().split()),
-                "model_used": model_used
-            }, ensure_ascii=False))
-
-    doc.close()
-
-    stem = Path(filename).stem
-    txt_save_path = None
-    jsonl_save_path = None
-
-    if req.save_to_txt and txt_blocks:
-        txt_target = settings.TXT_DIR / f"{stem}.txt"
-        txt_target.write_text("".join(txt_blocks), encoding="utf-8")
-        txt_save_path = str(txt_target.relative_to(settings.BASE_DIR))
-
-    if req.save_to_jsonl and jsonl_records:
-        jsonl_target = settings.JSONL_DIR / f"{stem}.jsonl"
-        jsonl_target.write_text("\n".join(jsonl_records) + "\n", encoding="utf-8")
-        jsonl_save_path = str(jsonl_target.relative_to(settings.BASE_DIR))
-
-    return {
-        "success": True,
-        "filename": filename,
-        "stem": stem,
-        "total_pages": total_doc_pages,
-        "processed_count": len(pages_result),
-        "txt_saved_path": txt_save_path,
-        "jsonl_saved_path": jsonl_save_path,
-        "pages": pages_result,
-        "full_text": "".join(txt_blocks)
-    }
+    return await DatasetService.convert_url_pdf_to_txt_sync(req)
 
 
 @router.post("/url-to-txt-stream")
 async def convert_url_pdf_to_txt_stream(req: UrlConvertToTxtRequest):
     """
-    Streaming SSE version for URL-to-TXT:
-    Downloads the PDF from URL on the server, streams real-time page-by-page progress & LaTeX cards,
-    while simultaneously writing .txt and .jsonl directly to the server's disk!
+    Streaming SSE version for a single PDF URL or Backend Database Store URL:
+    Streams live page_start, page_done, and writes .txt and .jsonl directly to disk.
     """
-    filename, content = await fetch_pdf_bytes_from_url(req.url)
-
-    if req.save_to_pdf_dataset:
-        pdf_path = settings.DATASET_DIR / filename
-        try:
-            pdf_path.write_bytes(content)
-        except Exception:
-            pass
-
+    # Auto-detect if URL points to a backend database API returning multiple PDFs
     try:
-        doc = fitz.open(stream=content, filetype="pdf")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse PDF document: {str(e)}")
-
-    total_doc_pages = len(doc)
-    start_idx = max(0, req.start_page - 1)
-    end_idx = min(total_doc_pages, req.end_page) if req.end_page else total_doc_pages
-    selected_count = max(0, end_idx - start_idx)
-
-    session_id = f"sess_url_stream_{uuid.uuid4().hex[:8]}"
-    AIService.set_active_session(session_id)
-
-    stem = Path(filename).stem
-    txt_target = settings.TXT_DIR / f"{stem}.txt" if req.save_to_txt else None
-    jsonl_target = settings.JSONL_DIR / f"{stem}.jsonl" if req.save_to_jsonl else None
-
-    if txt_target:
-        txt_target.write_text("", encoding="utf-8")
-    if jsonl_target:
-        jsonl_target.write_text("", encoding="utf-8")
-
-    async def event_generator():
-        try:
-            yield f"event: init\ndata: {json.dumps({'type': 'init', 'filename': filename, 'total_pages': total_doc_pages, 'selected_count': selected_count, 'start_page': start_idx + 1, 'end_page': end_idx})}\n\n"
-
-            for page_idx in range(start_idx, end_idx):
-                page_num = page_idx + 1
-                page = doc[page_idx]
-
-                if AIService.is_cancelled(session_id):
-                    yield f"event: cancelled\ndata: {json.dumps({'type': 'cancelled', 'message': 'Processing was stopped.'})}\n\n"
-                    break
-
-                yield f"event: page_start\ndata: {json.dumps({'type': 'page_start', 'page_number': page_num, 'total_pages': total_doc_pages, 'file_name': filename, 'doc_page_number': page_num})}\n\n"
-
-                is_blank = PDFService.is_page_blank(page)
-                thumb = PDFService.render_page_thumbnail_base64(page, dpi=75)
-
-                if is_blank:
-                    clean_text = "[ទំព័រទទេ / Blank Page]"
-                    page_data = {
-                        "type": "page_done",
-                        "page_number": page_num,
-                        "file_name": filename,
-                        "doc_page_number": page_num,
-                        "raw_text": "",
-                        "corrected_text": clean_text,
-                        "is_blank": True,
-                        "model_used": "blank-skipped",
-                        "thumbnail": thumb,
-                        "elapsed_seconds": 0.05,
-                        "tokens_used": 0,
-                        "char_count": len(clean_text),
-                        "word_count": len(clean_text.split()),
-                        "success": True
-                    }
-                    yield f"event: page_done\ndata: {json.dumps(page_data)}\n\n"
-                    if txt_target:
-                        with open(txt_target, "a", encoding="utf-8") as f:
-                            f.write(f"=== Page {page_num} ===\n\n{clean_text}\n\n")
-                    continue
-
-                raw_text = page.get_text("text").strip()
-
-                if not req.use_ai:
-                    clean_text = raw_text
-                    model_used = "pymupdf-direct"
-                    elapsed = 0.05
-                    tokens = 0
-                else:
-                    if req.mode == "vision":
-                        img_bytes = PDFService.render_page_image_bytes(page, dpi=req.dpi)
-                        res = await AIService.process_page_vision_async(
-                            image_bytes=img_bytes,
-                            page_number=page_num,
-                            provider=req.provider,
-                            preferred_model=req.model,
-                            session_id=session_id,
-                            api_key=req.api_key
-                        )
-                    else:
-                        res = await AIService.process_page_text_async(
-                            raw_text=raw_text,
-                            page_number=page_num,
-                            provider=req.provider,
-                            preferred_model=req.model,
-                            session_id=session_id,
-                            api_key=req.api_key
-                        )
-                    clean_text = res.get("corrected_text") or raw_text
-                    model_used = res.get("model_used") or req.model or "gemini"
-                    elapsed = res.get("elapsed_seconds", 1.0)
-                    tokens = res.get("total_tokens", 0)
-
-                page_data = {
-                    "type": "page_done",
-                    "page_number": page_num,
-                    "file_name": filename,
-                    "doc_page_number": page_num,
-                    "raw_text": raw_text,
-                    "corrected_text": clean_text,
-                    "char_count": len(clean_text),
-                    "word_count": len(clean_text.split()),
-                    "has_formulas": ("=" in clean_text or "+" in clean_text or "\\" in clean_text),
-                    "model_used": model_used,
-                    "thumbnail": thumb,
-                    "elapsed_seconds": elapsed,
-                    "tokens_used": tokens,
-                    "success": True
-                }
-                yield f"event: page_done\ndata: {json.dumps(page_data)}\n\n"
-
-                if txt_target:
-                    with open(txt_target, "a", encoding="utf-8") as f:
-                        f.write(f"=== Page {page_num} ===\n\n{clean_text}\n\n")
-
-                if jsonl_target and clean_text.strip():
-                    with open(jsonl_target, "a", encoding="utf-8") as f:
-                        record = {
-                            "document": filename,
-                            "page": page_num,
-                            "doc_page": page_num,
-                            "text": clean_text.strip(),
-                            "char_count": len(clean_text.strip()),
-                            "word_count": len(clean_text.strip().split()),
-                            "model_used": model_used
-                        }
-                        f.write(json.dumps(record, ensure_ascii=False) + "\n")
-
-            doc.close()
-
-            txt_rel = str(txt_target.relative_to(settings.BASE_DIR)) if txt_target else None
-            jsonl_rel = str(jsonl_target.relative_to(settings.BASE_DIR)) if jsonl_target else None
-
-            yield f"event: done\ndata: {json.dumps({'type': 'done', 'status': 'completed', 'filename': filename, 'txt_saved_path': txt_rel, 'jsonl_saved_path': jsonl_rel})}\n\n"
-
-        except Exception as e:
-            yield f"event: error\ndata: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+        inspect_res = await DatasetService.inspect_server_store_url(InspectUrlRequest(url=req.url))
+        if inspect_res.get("is_store") and inspect_res.get("pdfs"):
+            batch_req = BatchStoreConvertToTxtRequest(
+                items=inspect_res["pdfs"],
+                mode=req.mode,
+                provider=req.provider,
+                model=req.model,
+                dpi=req.dpi,
+                use_ai=req.use_ai,
+                save_to_txt=req.save_to_txt,
+                save_to_jsonl=req.save_to_jsonl,
+                save_to_pdf_dataset=req.save_to_pdf_dataset,
+                api_key=req.api_key
+            )
+            return await convert_batch_store_urls_stream(batch_req)
+    except Exception:
+        pass
 
     return StreamingResponse(
-        event_generator(),
+        DatasetService.stream_single_url_conversion(req),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -445,3 +105,67 @@ async def convert_url_pdf_to_txt_stream(req: UrlConvertToTxtRequest):
             "X-Accel-Buffering": "no"
         }
     )
+
+
+@router.post("/batch-url-to-txt-stream")
+async def convert_batch_store_urls_stream(req: BatchStoreConvertToTxtRequest):
+    """
+    Streaming SSE version for a Backend Database Store URL containing multiple PDFs.
+    """
+    return StreamingResponse(
+        DatasetService.stream_batch_store_conversion(req),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+@router.get("/list", response_model=List[DatasetFileItem])
+def list_dataset_files() -> List[DatasetFileItem]:
+    """
+    Lists all stored PDF files with metadata, status of corresponding .txt and .jsonl files.
+    """
+    items: List[DatasetFileItem] = []
+    if not settings.DATASET_DIR.exists():
+        return items
+
+    for p in sorted(settings.DATASET_DIR.glob("*.pdf"), key=lambda x: x.stat().st_mtime, reverse=True):
+        stem = p.stem
+        size_bytes = p.stat().st_size
+        txt_path = settings.TXT_DIR / f"{stem}.txt"
+        jsonl_path = settings.JSONL_DIR / f"{stem}.jsonl"
+
+        txt_exists = txt_path.exists()
+        txt_size = txt_path.stat().st_size if txt_exists else 0
+
+        jsonl_exists = jsonl_path.exists()
+        jsonl_size = jsonl_path.stat().st_size if jsonl_exists else 0
+
+        def _format_size(b: int) -> str:
+            if b < 1024:
+                return f"{b} B"
+            elif b < 1024 * 1024:
+                return f"{b / 1024:.1f} KB"
+            return f"{b / (1024 * 1024):.1f} MB"
+
+        items.append(
+            DatasetFileItem(
+                filename=p.name,
+                stem=stem,
+                size_bytes=size_bytes,
+                size_human=_format_size(size_bytes),
+                total_pages=0,  # Fast lightweight listing without full parsing
+                has_txt=txt_exists,
+                txt_filename=f"{stem}.txt" if txt_exists else None,
+                txt_size_bytes=txt_size,
+                txt_size_human=_format_size(txt_size),
+                has_jsonl=jsonl_exists,
+                jsonl_filename=f"{stem}.jsonl" if jsonl_exists else None,
+                jsonl_size_bytes=jsonl_size,
+                modified_time=p.stat().st_mtime
+            )
+        )
+    return items

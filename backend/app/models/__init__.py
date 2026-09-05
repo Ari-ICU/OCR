@@ -3,9 +3,21 @@ from app.models.schemas import (
     TextCorrectionResponse,
     ReprocessPageRequest,
     ExportRequest,
+    HealthResponse
+)
+from app.models.pdf import (
     PageOverview,
     PDFPreviewResponse,
-    HealthResponse
+    FileBreakdownItem,
+    ExtractPreviewQuery
+)
+from app.models.dataset import (
+    InspectUrlRequest,
+    InspectUrlResponse,
+    DiscoveredPdfItem,
+    UrlConvertToTxtRequest,
+    BatchStoreConvertToTxtRequest,
+    DatasetFileItem
 )
 
 __all__ = [
@@ -13,7 +25,15 @@ __all__ = [
     "TextCorrectionResponse",
     "ReprocessPageRequest",
     "ExportRequest",
+    "HealthResponse",
     "PageOverview",
     "PDFPreviewResponse",
-    "HealthResponse"
+    "FileBreakdownItem",
+    "ExtractPreviewQuery",
+    "InspectUrlRequest",
+    "InspectUrlResponse",
+    "DiscoveredPdfItem",
+    "UrlConvertToTxtRequest",
+    "BatchStoreConvertToTxtRequest",
+    "DatasetFileItem",
 ]
