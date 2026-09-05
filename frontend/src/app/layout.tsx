@@ -4,6 +4,13 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Khmer OCR & AI Formula Corrector",
   description: "Extract Khmer text from PDF, fix Unicode character ordering, grammar, and preserve mathematical formulas with Gemini AI.",
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico", sizes: "any" },
+    ],
+    apple: "/icon.png",
+  },
 };
 
 export default function RootLayout({
